@@ -3,12 +3,23 @@ import { supabase } from '../lib/supabase'
 
 interface Promo { id: string; name: string; description: string; discount_type: 'percentage' | 'fixed'; discount_value: number; free_delivery: boolean; start_date: string; end_date: string; is_active: boolean }
 
+interface FormData {
+  name: string
+  description: string
+  discount_type: 'percentage' | 'fixed'
+  discount_value: number
+  free_delivery: boolean
+  start_date: string
+  end_date: string
+  is_active: boolean
+}
+
 export function PromosPage() {
   const [promos, setPromos] = useState<Promo[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Promo | null>(null)
-  const [formData, setFormData] = useState({ name: '', description: '', discount_type: 'percentage' as const, discount_value: 10, free_delivery: false, start_date: '', end_date: '', is_active: true })
+  const [formData, setFormData] = useState<FormData>({ name: '', description: '', discount_type: 'percentage', discount_value: 10, free_delivery: false, start_date: '', end_date: '', is_active: true })
 
   useEffect(() => { fetchPromos() }, [])
 
