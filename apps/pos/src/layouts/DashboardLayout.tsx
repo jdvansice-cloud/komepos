@@ -8,8 +8,6 @@ const menuItems = [
   { path: '/products', icon: '🍔', label: 'Products' },
   { path: '/categories', icon: '📁', label: 'Categories' },
   { path: '/customers', icon: '👥', label: 'Customers' },
-  { path: '/locations', icon: '📍', label: 'Locations' },
-  { path: '/users', icon: '👤', label: 'Users', roles: ['admin'] },
   { path: '/promos', icon: '🎉', label: 'Promotions' },
   { path: '/reports', icon: '📈', label: 'Reports', roles: ['admin', 'supervisor'] },
   { path: '/settings', icon: '⚙️', label: 'Settings', roles: ['admin'] },

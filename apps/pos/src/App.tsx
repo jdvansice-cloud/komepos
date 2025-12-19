@@ -8,8 +8,6 @@ import { OrdersPage } from './pages/OrdersPage'
 import { ProductsPage } from './pages/ProductsPage'
 import { CategoriesPage } from './pages/CategoriesPage'
 import { CustomersPage } from './pages/CustomersPage'
-import { LocationsPage } from './pages/LocationsPage'
-import { UsersPage } from './pages/UsersPage'
 import { PromosPage } from './pages/PromosPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -27,9 +25,7 @@ function App() {
             <Route path="/products" element={<ProductsPage />} />
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/customers" element={<CustomersPage />} />
-            <Route path="/locations" element={<LocationsPage />} />
             <Route path="/promos" element={<PromosPage />} />
-            <Route path="/users" element={<ProtectedRoute allowedRoles={['admin']}><UsersPage /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute allowedRoles={['admin', 'supervisor']}><ReportsPage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute allowedRoles={['admin']}><SettingsPage /></ProtectedRoute>} />
           </Route>
