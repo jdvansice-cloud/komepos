@@ -5,7 +5,7 @@ import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 
 interface Category { id: string; name: string; image_url: string }
-interface Product { id: string; name: string; description: string; price: number; image_url: string; category_id: string; is_active: boolean }
+interface Product { id: string; name: string; description: string; base_price: number; image_url: string; category_id: string; is_active: boolean }
 
 export function HomePage() {
   const [categories, setCategories] = useState<Category[]>([])
@@ -88,9 +88,9 @@ export function HomePage() {
                       <p className="text-sm text-gray-500 line-clamp-2">{product.description}</p>
                     </div>
                     <div className="flex justify-between items-center mt-2">
-                      <span className="font-bold text-red-600">${product.price.toFixed(2)}</span>
+                      <span className="font-bold text-red-600">${(product.base_price || 0).toFixed(2)}</span>
                       <button
-                        onClick={() => addItem(product)}
+                        onClick={() => addItem({ id: product.id, name: product.name, price: product.base_price || 0, image_url: product.image_url })}
                         className="bg-red-600 text-white px-4 py-1 rounded-full text-sm hover:bg-red-700 transition"
                       >
                         + Add

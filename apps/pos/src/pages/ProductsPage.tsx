@@ -5,7 +5,7 @@ interface Product {
   id: string
   name: string
   description: string
-  price: number
+  base_price: number
   image_url: string
   is_taxable: boolean
   is_active: boolean
@@ -26,7 +26,7 @@ export function ProductsPage() {
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
   const [filter, setFilter] = useState('')
-  const [formData, setFormData] = useState({ name: '', description: '', price: 0, image_url: '', is_taxable: true, is_active: true, category_id: '' })
+  const [formData, setFormData] = useState({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: '' })
 
   useEffect(() => { fetchData() }, [])
 
@@ -48,10 +48,10 @@ export function ProductsPage() {
   function openModal(product?: Product) {
     if (product) {
       setEditing(product)
-      setFormData({ name: product.name, description: product.description || '', price: product.price, image_url: product.image_url || '', is_taxable: product.is_taxable, is_active: product.is_active, category_id: product.category_id })
+      setFormData({ name: product.name, description: product.description || '', base_price: product.base_price, image_url: product.image_url || '', is_taxable: product.is_taxable, is_active: product.is_active, category_id: product.category_id })
     } else {
       setEditing(null)
-      setFormData({ name: '', description: '', price: 0, image_url: '', is_taxable: true, is_active: true, category_id: categories[0]?.id || '' })
+      setFormData({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: categories[0]?.id || '' })
     }
     setShowModal(true)
   }
@@ -117,7 +117,7 @@ export function ProductsPage() {
                     </div>
                   </td>
                   <td className="px-6 py-4 text-gray-600">{product.category?.name}</td>
-                  <td className="px-6 py-4 font-medium">${product.price.toFixed(2)}</td>
+                  <td className="px-6 py-4 font-medium">${product.base_price.toFixed(2)}</td>
                   <td className="px-6 py-4">
                     <span className={`px-2 py-1 rounded-full text-xs ${product.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{product.is_active ? 'Active' : 'Inactive'}</span>
                   </td>
@@ -148,7 +148,7 @@ export function ProductsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Price *</label>
-                  <input type="number" step="0.01" min="0" value={formData.price} onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required />
+                  <input type="number" step="0.01" min="0" value={formData.base_price} onChange={(e) => setFormData({ ...formData, base_price: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
