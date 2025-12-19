@@ -7,7 +7,7 @@ type UserRole = 'admin' | 'supervisor' | 'operator'
 interface Company { id: string; name: string; ruc: string; dv: string; itbms_rate: number; address: string; phone: string; email: string }
 interface Location { id: string; name: string; address: string; phone: string; is_active: boolean; opening_hours: string; accepts_delivery: boolean; delivery_fee: number }
 interface LocationOption { id: string; name: string }
-interface User { id: string; full_name: string; email: string; role: UserRole; location_id: string | null; is_active: boolean; location?: { name: string } }
+interface User { id: string; full_name: string; email: string; role: UserRole; is_active: boolean }
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('company')
@@ -231,12 +231,21 @@ function LocationsSettings() {
 }
 
 // Users Settings Component
+interface UserWithLocations {
+  id: string
+  full_name: string
+  email: string
+  role: UserRole
+  is_active: boolean
+  locations: LocationOption[]
+}
+
 function UsersSettings() {
-  const [users, setUsers] = useState<(User & { locations: LocationOption[] })[]>([])
+  const [users, setUsers] = useState<UserWithLocations[]>([])
   const [locations, setLocations] = useState<LocationOption[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [editing, setEditing] = useState<(User & { locations: LocationOption[] }) | null>(null)
+  const [editing, setEditing] = useState<UserWithLocations | null>(null)
   const [formData, setFormData] = useState<{ full_name: string; email: string; role: UserRole; location_ids: string[]; is_active: boolean }>({ full_name: '', email: '', role: 'operator', location_ids: [], is_active: true })
 
   useEffect(() => { fetchData() }, [])
@@ -250,23 +259,23 @@ function UsersSettings() {
       
       // Fetch user_locations for each user
       const usersWithLocations = await Promise.all(
-        (usersRes.data || []).map(async (user: User) => {
+        (usersRes.data || []).map(async (user) => {
           const { data: userLocs } = await supabase
             .from('user_locations')
             .select('location:locations(id, name)')
             .eq('user_id', user.id)
           const locs = userLocs?.map((ul: any) => ul.location).filter(Boolean) || []
-          return { ...user, locations: locs }
+          return { ...user, locations: locs as LocationOption[] }
         })
       )
       
-      setUsers(usersWithLocations)
+      setUsers(usersWithLocations as UserWithLocations[])
       setLocations(locationsRes.data || [])
     } catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
   }
 
-  function openModal(user?: (User & { locations: LocationOption[] })) {
+  function openModal(user?: UserWithLocations) {
     if (user) { 
       setEditing(user)
       setFormData({ 
