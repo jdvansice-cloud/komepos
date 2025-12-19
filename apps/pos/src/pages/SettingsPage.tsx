@@ -373,7 +373,6 @@ function UsersSettings() {
       alert('An error occurred')
     }
   }
-  }
 
   const roleColors: Record<UserRole, string> = { admin: 'bg-purple-100 text-purple-700', supervisor: 'bg-blue-100 text-blue-700', operator: 'bg-gray-100 text-gray-700' }
 
