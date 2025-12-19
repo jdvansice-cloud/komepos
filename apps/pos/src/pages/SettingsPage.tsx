@@ -6,6 +6,7 @@ type UserRole = 'admin' | 'supervisor' | 'operator'
 
 interface Company { id: string; name: string; ruc: string; dv: string; itbms_rate: number; address: string; phone: string; email: string }
 interface Location { id: string; name: string; address: string; phone: string; is_active: boolean; opening_hours: string; accepts_delivery: boolean; delivery_fee: number }
+interface LocationOption { id: string; name: string }
 interface User { id: string; full_name: string; email: string; role: UserRole; location_id: string | null; is_active: boolean; location?: { name: string } }
 
 export function SettingsPage() {
@@ -232,7 +233,7 @@ function LocationsSettings() {
 // Users Settings Component
 function UsersSettings() {
   const [users, setUsers] = useState<User[]>([])
-  const [locations, setLocations] = useState<Location[]>([])
+  const [locations, setLocations] = useState<LocationOption[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<User | null>(null)
