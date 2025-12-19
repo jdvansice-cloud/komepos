@@ -246,7 +246,7 @@ function UsersSettings() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<UserWithLocations | null>(null)
-  const [formData, setFormData] = useState<{ full_name: string; email: string; role: UserRole; location_ids: string[]; is_active: boolean }>({ full_name: '', email: '', role: 'operator', location_ids: [], is_active: true })
+  const [formData, setFormData] = useState<{ full_name: string; email: string; password: string; role: UserRole; location_ids: string[]; is_active: boolean }>({ full_name: '', email: '', password: '', role: 'operator', location_ids: [], is_active: true })
 
   useEffect(() => { fetchData() }, [])
 
@@ -281,13 +281,14 @@ function UsersSettings() {
       setFormData({ 
         full_name: user.full_name, 
         email: user.email, 
+        password: '',
         role: user.role, 
         location_ids: user.locations.map(l => l.id), 
         is_active: user.is_active 
       }) 
     } else { 
       setEditing(null)
-      setFormData({ full_name: '', email: '', role: 'operator', location_ids: [], is_active: true }) 
+      setFormData({ full_name: '', email: '', password: '', role: 'operator', location_ids: [], is_active: true }) 
     }
     setShowModal(true)
   }
@@ -312,12 +313,66 @@ function UsersSettings() {
             formData.location_ids.map(loc_id => ({ user_id: editing.id, location_id: loc_id }))
           )
         }
-      } else { 
-        alert('Create users via Supabase Dashboard → Authentication'); return 
+      } else {
+        // Validate password
+        if (formData.password.length < 6) {
+          alert('Password must be at least 6 characters')
+          return
+        }
+
+        // Create auth user
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+          options: {
+            data: { full_name: formData.full_name }
+          }
+        })
+
+        if (authError) {
+          alert('Error creating user: ' + authError.message)
+          return
+        }
+
+        if (!authData.user) {
+          alert('Error: No user returned')
+          return
+        }
+
+        // Get company_id
+        const { data: company } = await supabase.from('companies').select('id').single()
+
+        // Create user profile
+        const { error: profileError } = await supabase.from('users').insert({
+          id: authData.user.id,
+          company_id: company?.id,
+          email: formData.email,
+          full_name: formData.full_name,
+          role: formData.role,
+          is_active: formData.is_active
+        })
+
+        if (profileError) {
+          alert('Error creating profile: ' + profileError.message)
+          return
+        }
+
+        // Assign locations
+        if (formData.location_ids.length > 0) {
+          await supabase.from('user_locations').insert(
+            formData.location_ids.map(loc_id => ({ user_id: authData.user!.id, location_id: loc_id }))
+          )
+        }
+
+        alert(`User created! They can login with:\nEmail: ${formData.email}\nPassword: ${formData.password}`)
       }
       setShowModal(false)
       fetchData()
-    } catch (error) { console.error('Error:', error) }
+    } catch (error) { 
+      console.error('Error:', error)
+      alert('An error occurred')
+    }
+  }
   }
 
   const roleColors: Record<UserRole, string> = { admin: 'bg-purple-100 text-purple-700', supervisor: 'bg-blue-100 text-blue-700', operator: 'bg-gray-100 text-gray-700' }
@@ -376,6 +431,9 @@ function UsersSettings() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label><input type="text" value={formData.full_name} onChange={(e) => setFormData({ ...formData, full_name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Email *</label><input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" disabled={!!editing} required /></div>
+              {!editing && (
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Password *</label><input type="password" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" minLength={6} required /><p className="text-xs text-gray-500 mt-1">Minimum 6 characters</p></div>
+              )}
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Role *</label><select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })} className="w-full border border-gray-300 rounded-lg px-4 py-2"><option value="operator">Operator</option><option value="supervisor">Supervisor</option><option value="admin">Admin</option></select></div>
               
               {formData.role !== 'admin' && (
