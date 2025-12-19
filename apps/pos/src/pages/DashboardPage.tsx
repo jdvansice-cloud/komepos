@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase } from '@komepos/supabase/client'
+import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
 interface DashboardStats {

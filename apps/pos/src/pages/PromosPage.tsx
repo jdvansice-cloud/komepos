@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '@komepos/supabase/client'
+import { supabase } from '../lib/supabase'
 
 interface Promo { id: string; name: string; description: string; discount_type: 'percentage' | 'fixed'; discount_value: number; free_delivery: boolean; start_date: string; end_date: string; is_active: boolean }
 

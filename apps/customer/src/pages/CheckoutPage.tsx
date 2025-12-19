@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
-import { supabase } from '@komepos/supabase/client'
+import { supabase } from '../lib/supabase'
 
 export function CheckoutPage() {
   const { items, total, clearCart } = useCart()

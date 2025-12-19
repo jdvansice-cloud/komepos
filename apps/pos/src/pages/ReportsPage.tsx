@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '@komepos/supabase/client'
+import { supabase } from '../lib/supabase'
 
 export function ReportsPage() {
   const [loading, setLoading] = useState(true)

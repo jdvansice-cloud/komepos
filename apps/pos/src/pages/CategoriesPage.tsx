@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '@komepos/supabase/client'
+import { supabase } from '../lib/supabase'
 
 interface Category { id: string; name: string; description: string; image_url: string; sort_order: number; is_active: boolean }
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '@komepos/supabase/client'
+import { supabase } from '../lib/supabase'
 
 interface CompanySettings { id: string; name: string; ruc: string; dv: string; itbms_rate: number; phone: string; email: string; address: string }
 

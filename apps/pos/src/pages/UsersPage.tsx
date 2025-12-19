@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '@komepos/supabase/client'
+import { supabase } from '../lib/supabase'
 
 interface User { id: string; full_name: string; email: string; role: 'admin' | 'supervisor' | 'operator'; location_id: string | null; is_active: boolean; location?: { name: string } }
 interface Location { id: string; name: string }

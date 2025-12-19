@@ -2,13 +2,5 @@
   "name": "komepos",
   "version": "1.0.0",
   "private": true,
-  "scripts": {
-    "dev:pos": "pnpm --filter @komepos/pos dev",
-    "dev:customer": "pnpm --filter @komepos/customer dev",
-    "build:pos": "pnpm --filter @komepos/pos build",
-    "build:customer": "pnpm --filter @komepos/customer build"
-  },
-  "devDependencies": {
-    "typescript": "^5.3.3"
-  }
+  "packageManager": "pnpm@8.15.0"
 }
