@@ -62,7 +62,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('user_id', userId)
         .single()
 
-      if (error) throw error
+      if (error || !data) {
+        // Not a customer - sign them out
+        console.log('User is not a customer')
+        await supabase.auth.signOut()
+        setProfile(null)
+        return
+      }
       setProfile(data)
     } catch (error) {
       console.error('Error fetching profile:', error)
@@ -74,8 +80,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signIn(email: string, password: string) {
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
+
+      // Check if this is a customer account
+      if (data.user) {
+        const { data: customerData, error: customerError } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('user_id', data.user.id)
+          .single()
+
+        if (customerError || !customerData) {
+          await supabase.auth.signOut()
+          throw new Error('This account is not registered as a customer. Please use the restaurant POS app.')
+        }
+      }
+      
       return { error: null }
     } catch (error) {
       return { error: error as Error }

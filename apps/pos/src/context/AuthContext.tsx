@@ -103,33 +103,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function fetchUserData(userId: string) {
     try {
       // Fetch user profile
-      const { data: profileData } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from('users')
         .select('id, company_id, role, full_name, email')
         .eq('id', userId)
         .single()
       
-      if (profileData) {
-        setProfile(profileData as UserProfile)
-        
-        // Fetch user's assigned locations
-        const { data: userLocations } = await supabase
-          .from('user_locations')
-          .select('location:locations(id, name)')
-          .eq('user_id', userId)
-        
-        const locs = userLocations?.map((ul: any) => ul.location).filter(Boolean) || []
-        setLocations(locs)
-        
-        // Auto-select if only one location
-        if (locs.length === 1) {
-          setActiveLocation(locs[0])
-        }
-        
-        // Admins don't need location selection - they see all
-        if (profileData.role === 'admin') {
-          setActiveLocation(null) // null means "all locations" for admins
-        }
+      if (profileError || !profileData) {
+        // Not a POS user - sign them out
+        console.log('User is not a POS staff member')
+        await supabase.auth.signOut()
+        setProfile(null)
+        setLoading(false)
+        return
+      }
+
+      setProfile(profileData as UserProfile)
+      
+      // Fetch user's assigned locations
+      const { data: userLocations } = await supabase
+        .from('user_locations')
+        .select('location:locations(id, name)')
+        .eq('user_id', userId)
+      
+      const locs = userLocations?.map((ul: any) => ul.location).filter(Boolean) || []
+      setLocations(locs)
+      
+      // Auto-select if only one location
+      if (locs.length === 1) {
+        setActiveLocation(locs[0])
+      }
+      
+      // Admins don't need location selection - they see all
+      if (profileData.role === 'admin') {
+        setActiveLocation(null) // null means "all locations" for admins
       }
     } catch (error) {
       console.error('Error fetching user data:', error)
@@ -141,8 +148,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signIn(email: string, password: string) {
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
+
+      // Check if this is a POS user (has a profile in users table)
+      if (data.user) {
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('id')
+          .eq('id', data.user.id)
+          .single()
+
+        if (userError || !userData) {
+          await supabase.auth.signOut()
+          throw new Error('This account is not registered as staff. Please use the customer delivery app.')
+        }
+      }
+
       return { error: null }
     } catch (error) {
       return { error: error as Error }
