@@ -232,38 +232,82 @@ function LocationsSettings() {
 
 // Users Settings Component
 function UsersSettings() {
-  const [users, setUsers] = useState<User[]>([])
+  const [users, setUsers] = useState<(User & { locations: LocationOption[] })[]>([])
   const [locations, setLocations] = useState<LocationOption[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [editing, setEditing] = useState<User | null>(null)
-  const [formData, setFormData] = useState<{ full_name: string; email: string; role: UserRole; location_id: string; is_active: boolean }>({ full_name: '', email: '', role: 'operator', location_id: '', is_active: true })
+  const [editing, setEditing] = useState<(User & { locations: LocationOption[] }) | null>(null)
+  const [formData, setFormData] = useState<{ full_name: string; email: string; role: UserRole; location_ids: string[]; is_active: boolean }>({ full_name: '', email: '', role: 'operator', location_ids: [], is_active: true })
 
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
     try {
       const [usersRes, locationsRes] = await Promise.all([
-        supabase.from('users').select('*, location:locations(name)').order('full_name'),
+        supabase.from('users').select('id, full_name, email, role, is_active').order('full_name'),
         supabase.from('locations').select('id, name').order('name'),
       ])
-      setUsers(usersRes.data || []); setLocations(locationsRes.data || [])
+      
+      // Fetch user_locations for each user
+      const usersWithLocations = await Promise.all(
+        (usersRes.data || []).map(async (user: User) => {
+          const { data: userLocs } = await supabase
+            .from('user_locations')
+            .select('location:locations(id, name)')
+            .eq('user_id', user.id)
+          const locs = userLocs?.map((ul: any) => ul.location).filter(Boolean) || []
+          return { ...user, locations: locs }
+        })
+      )
+      
+      setUsers(usersWithLocations)
+      setLocations(locationsRes.data || [])
     } catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
   }
 
-  function openModal(user?: User) {
-    if (user) { setEditing(user); setFormData({ full_name: user.full_name, email: user.email, role: user.role, location_id: user.location_id || '', is_active: user.is_active }) }
-    else { setEditing(null); setFormData({ full_name: '', email: '', role: 'operator', location_id: '', is_active: true }) }
+  function openModal(user?: (User & { locations: LocationOption[] })) {
+    if (user) { 
+      setEditing(user)
+      setFormData({ 
+        full_name: user.full_name, 
+        email: user.email, 
+        role: user.role, 
+        location_ids: user.locations.map(l => l.id), 
+        is_active: user.is_active 
+      }) 
+    } else { 
+      setEditing(null)
+      setFormData({ full_name: '', email: '', role: 'operator', location_ids: [], is_active: true }) 
+    }
     setShowModal(true)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     try {
-      if (editing) { await supabase.from('users').update({ full_name: formData.full_name, role: formData.role, location_id: formData.location_id || null, is_active: formData.is_active }).eq('id', editing.id) }
-      else { alert('Create users via Supabase Dashboard → Authentication'); return }
-      setShowModal(false); fetchData()
+      if (editing) {
+        // Update user basic info
+        await supabase.from('users').update({ 
+          full_name: formData.full_name, 
+          role: formData.role, 
+          is_active: formData.is_active 
+        }).eq('id', editing.id)
+        
+        // Delete existing location assignments
+        await supabase.from('user_locations').delete().eq('user_id', editing.id)
+        
+        // Insert new location assignments
+        if (formData.location_ids.length > 0) {
+          await supabase.from('user_locations').insert(
+            formData.location_ids.map(loc_id => ({ user_id: editing.id, location_id: loc_id }))
+          )
+        }
+      } else { 
+        alert('Create users via Supabase Dashboard → Authentication'); return 
+      }
+      setShowModal(false)
+      fetchData()
     } catch (error) { console.error('Error:', error) }
   }
 
@@ -284,7 +328,7 @@ function UsersSettings() {
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Locations</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
           </tr></thead>
@@ -294,7 +338,19 @@ function UsersSettings() {
                 <td className="px-6 py-4 font-medium text-gray-800">{user.full_name}</td>
                 <td className="px-6 py-4 text-gray-600">{user.email}</td>
                 <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${roleColors[user.role]}`}>{user.role}</span></td>
-                <td className="px-6 py-4 text-gray-600">{user.location?.name || 'All Locations'}</td>
+                <td className="px-6 py-4 text-gray-600">
+                  {user.role === 'admin' ? (
+                    <span className="text-purple-600 text-sm">All Locations</span>
+                  ) : user.locations.length === 0 ? (
+                    <span className="text-red-500 text-sm">None assigned</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1">
+                      {user.locations.map(loc => (
+                        <span key={loc.id} className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs">{loc.name}</span>
+                      ))}
+                    </div>
+                  )}
+                </td>
                 <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs ${user.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{user.is_active ? 'Active' : 'Inactive'}</span></td>
                 <td className="px-6 py-4 text-right"><button onClick={() => openModal(user)} className="text-blue-600 hover:text-blue-800">Edit</button></td>
               </tr>
@@ -306,13 +362,74 @@ function UsersSettings() {
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">{editing ? 'Edit User' : 'Add User'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label><input type="text" value={formData.full_name} onChange={(e) => setFormData({ ...formData, full_name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Email *</label><input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" disabled={!!editing} required /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Role *</label><select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })} className="w-full border border-gray-300 rounded-lg px-4 py-2"><option value="operator">Operator</option><option value="supervisor">Supervisor</option><option value="admin">Admin</option></select></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Location</label><select value={formData.location_id} onChange={(e) => setFormData({ ...formData, location_id: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2"><option value="">All Locations</option>{locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}</select></div>
+              
+              {formData.role !== 'admin' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Assigned Locations</label>
+                  
+                  {/* Dropdown to add locations */}
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value && !formData.location_ids.includes(e.target.value)) {
+                        setFormData(prev => ({
+                          ...prev,
+                          location_ids: [...prev.location_ids, e.target.value]
+                        }))
+                      }
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 mb-3"
+                  >
+                    <option value="">Select location to add...</option>
+                    {locations
+                      .filter(loc => !formData.location_ids.includes(loc.id))
+                      .map(loc => (
+                        <option key={loc.id} value={loc.id}>{loc.name}</option>
+                      ))
+                    }
+                  </select>
+                  
+                  {/* Selected locations as tags */}
+                  <div className="flex flex-wrap gap-2">
+                    {formData.location_ids.map(locId => {
+                      const loc = locations.find(l => l.id === locId)
+                      return loc ? (
+                        <span 
+                          key={locId} 
+                          className="inline-flex items-center gap-1 bg-gray-100 border border-gray-300 rounded-full px-3 py-1 text-sm"
+                        >
+                          {loc.name}
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({
+                              ...prev,
+                              location_ids: prev.location_ids.filter(id => id !== locId)
+                            }))}
+                            className="text-gray-500 hover:text-gray-700 ml-1"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ) : null
+                    })}
+                    {formData.location_ids.length === 0 && (
+                      <p className="text-sm text-gray-500 italic">No locations assigned</p>
+                    )}
+                  </div>
+                </div>
+              )}
+              {formData.role === 'admin' && (
+                <p className="text-sm text-purple-600 bg-purple-50 p-3 rounded-lg">
+                  👑 Admins have access to all locations automatically
+                </p>
+              )}
+              
               <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" /><span className="text-sm">Active</span></label>
               <div className="flex justify-end gap-2 pt-4">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>

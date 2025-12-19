@@ -5,17 +5,25 @@ import { supabase } from '../lib/supabase'
 interface UserProfile {
   id: string
   company_id: string
-  location_id: string | null
   role: 'admin' | 'supervisor' | 'operator'
   full_name: string
   email: string
+}
+
+interface UserLocation {
+  id: string
+  name: string
 }
 
 interface AuthContextType {
   session: Session | null
   user: User | null
   profile: UserProfile | null
+  locations: UserLocation[]
+  activeLocation: UserLocation | null
+  setActiveLocation: (location: UserLocation | null) => void
   loading: boolean
+  needsLocationSelect: boolean
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
 }
@@ -26,7 +34,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [locations, setLocations] = useState<UserLocation[]>([])
+  const [activeLocation, setActiveLocation] = useState<UserLocation | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // Check if user needs to select a location (non-admin with multiple locations)
+  const needsLocationSelect = !!(
+    profile && 
+    profile.role !== 'admin' && 
+    locations.length > 1 && 
+    !activeLocation
+  )
 
   useEffect(() => {
     let mounted = true
@@ -47,13 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (session?.user && mounted) {
-          const { data: profileData } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', session.user.id)
-            .single()
-          
-          if (mounted) setProfile(profileData as UserProfile | null)
+          await fetchUserData(session.user.id)
         }
       } catch (error) {
         console.error('Init auth error:', error)
@@ -72,18 +84,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null)
         
         if (session?.user) {
-          const { data: profileData } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', session.user.id)
-            .single()
-          
-          if (mounted) {
-            setProfile(profileData as UserProfile | null)
-            setLoading(false)
-          }
+          await fetchUserData(session.user.id)
         } else {
           setProfile(null)
+          setLocations([])
+          setActiveLocation(null)
           setLoading(false)
         }
       }
@@ -94,6 +99,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe()
     }
   }, [])
+
+  async function fetchUserData(userId: string) {
+    try {
+      // Fetch user profile
+      const { data: profileData } = await supabase
+        .from('users')
+        .select('id, company_id, role, full_name, email')
+        .eq('id', userId)
+        .single()
+      
+      if (profileData) {
+        setProfile(profileData as UserProfile)
+        
+        // Fetch user's assigned locations
+        const { data: userLocations } = await supabase
+          .from('user_locations')
+          .select('location:locations(id, name)')
+          .eq('user_id', userId)
+        
+        const locs = userLocations?.map((ul: any) => ul.location).filter(Boolean) || []
+        setLocations(locs)
+        
+        // Auto-select if only one location
+        if (locs.length === 1) {
+          setActiveLocation(locs[0])
+        }
+        
+        // Admins don't need location selection - they see all
+        if (profileData.role === 'admin') {
+          setActiveLocation(null) // null means "all locations" for admins
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching user data:', error)
+      setProfile(null)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   async function signIn(email: string, password: string) {
     try {
@@ -108,10 +152,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signOut() {
     await supabase.auth.signOut()
     setProfile(null)
+    setLocations([])
+    setActiveLocation(null)
   }
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ 
+      session, 
+      user, 
+      profile, 
+      locations,
+      activeLocation,
+      setActiveLocation,
+      loading, 
+      needsLocationSelect,
+      signIn, 
+      signOut 
+    }}>
       {children}
     </AuthContext.Provider>
   )
