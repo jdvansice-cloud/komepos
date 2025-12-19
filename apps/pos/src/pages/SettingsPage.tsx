@@ -5,7 +5,7 @@ type TabType = 'company' | 'locations' | 'users'
 type UserRole = 'admin' | 'supervisor' | 'operator'
 
 interface Company { id: string; name: string; ruc: string; dv: string; itbms_rate: number; address: string; phone: string; email: string }
-interface Location { id: string; name: string; address: string; phone: string; is_active: boolean; opening_hours: string; accepts_delivery: boolean; delivery_fee: number }
+interface Location { id: string; name: string; address: string; phone: string; is_active: boolean; opening_hours: string; accepts_delivery: boolean; delivery_fee: number; latitude: number | null; longitude: number | null }
 interface LocationOption { id: string; name: string }
 interface User { id: string; full_name: string; email: string; role: UserRole; is_active: boolean }
 
@@ -135,7 +135,7 @@ function LocationsSettings() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Location | null>(null)
-  const [formData, setFormData] = useState({ name: '', address: '', phone: '', is_active: true, opening_hours: '', accepts_delivery: true, delivery_fee: 3.00 })
+  const [formData, setFormData] = useState({ name: '', address: '', phone: '', is_active: true, opening_hours: '', accepts_delivery: true, delivery_fee: 3.00, latitude: '', longitude: '' })
 
   useEffect(() => { fetchLocations() }, [])
 
@@ -146,16 +146,27 @@ function LocationsSettings() {
   }
 
   function openModal(location?: Location) {
-    if (location) { setEditing(location); setFormData({ name: location.name, address: location.address || '', phone: location.phone || '', is_active: location.is_active, opening_hours: location.opening_hours || '', accepts_delivery: location.accepts_delivery, delivery_fee: location.delivery_fee || 3.00 }) }
-    else { setEditing(null); setFormData({ name: '', address: '', phone: '', is_active: true, opening_hours: '', accepts_delivery: true, delivery_fee: 3.00 }) }
+    if (location) { setEditing(location); setFormData({ name: location.name, address: location.address || '', phone: location.phone || '', is_active: location.is_active, opening_hours: location.opening_hours || '', accepts_delivery: location.accepts_delivery, delivery_fee: location.delivery_fee || 3.00, latitude: location.latitude?.toString() || '', longitude: location.longitude?.toString() || '' }) }
+    else { setEditing(null); setFormData({ name: '', address: '', phone: '', is_active: true, opening_hours: '', accepts_delivery: true, delivery_fee: 3.00, latitude: '', longitude: '' }) }
     setShowModal(true)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     try {
-      if (editing) { await supabase.from('locations').update(formData).eq('id', editing.id) }
-      else { const { data: company } = await supabase.from('companies').select('id').single(); await supabase.from('locations').insert({ ...formData, company_id: company?.id }) }
+      const submitData = {
+        name: formData.name,
+        address: formData.address,
+        phone: formData.phone,
+        is_active: formData.is_active,
+        opening_hours: formData.opening_hours,
+        accepts_delivery: formData.accepts_delivery,
+        delivery_fee: formData.delivery_fee,
+        latitude: formData.latitude ? parseFloat(formData.latitude) : null,
+        longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+      }
+      if (editing) { await supabase.from('locations').update(submitData).eq('id', editing.id) }
+      else { const { data: company } = await supabase.from('companies').select('id').single(); await supabase.from('locations').insert({ ...submitData, company_id: company?.id }) }
       setShowModal(false); fetchLocations()
     } catch (error) { console.error('Error:', error) }
   }
@@ -190,6 +201,16 @@ function LocationsSettings() {
                 <div className="flex gap-3 mt-2 text-xs">
                   {location.accepts_delivery && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded">Delivery: ${location.delivery_fee?.toFixed(2)}</span>}
                   {location.opening_hours && <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded">{location.opening_hours}</span>}
+                  {location.latitude && location.longitude && (
+                    <a 
+                      href={`https://www.google.com/maps?q=${location.latitude},${location.longitude}`} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200"
+                    >
+                      📍 View Map
+                    </a>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -209,6 +230,29 @@ function LocationsSettings() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Address</label><textarea value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={2} /></div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Coordinates</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="text" value={formData.latitude} onChange={(e) => setFormData({ ...formData, latitude: e.target.value })} placeholder="Latitude (e.g. 9.0820)" className="border border-gray-300 rounded-lg px-4 py-2" />
+                  <input type="text" value={formData.longitude} onChange={(e) => setFormData({ ...formData, longitude: e.target.value })} placeholder="Longitude (e.g. -79.5200)" className="border border-gray-300 rounded-lg px-4 py-2" />
+                </div>
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    if (navigator.geolocation) {
+                      navigator.geolocation.getCurrentPosition(
+                        (pos) => setFormData({ ...formData, latitude: pos.coords.latitude.toFixed(6), longitude: pos.coords.longitude.toFixed(6) }),
+                        (err) => alert('Could not get location: ' + err.message)
+                      )
+                    } else {
+                      alert('Geolocation not supported by your browser')
+                    }
+                  }}
+                  className="mt-2 text-sm text-blue-600 hover:text-blue-800"
+                >
+                  📍 Use Current Location
+                </button>
+              </div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone</label><input type="tel" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Opening Hours</label><input type="text" value={formData.opening_hours} onChange={(e) => setFormData({ ...formData, opening_hours: e.target.value })} placeholder="Mon-Fri 9am-9pm" className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
               <div className="grid grid-cols-2 gap-4">
