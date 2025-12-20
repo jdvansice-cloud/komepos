@@ -6,7 +6,7 @@ interface Category { id: string; name: string; sort_order: number }
 interface Product { id: string; name: string; description: string; base_price: number; image_url: string; category_id: string; is_taxable: boolean }
 interface CartItem { product: Product; quantity: number; notes: string }
 interface Customer { id: string; full_name: string; phone: string; email: string }
-interface DeliveryZone { id: string; name: string; price: number }
+interface DeliveryZone { id: string; name: string; delivery_fee: number }
 
 export function POSPage() {
   const { profile, activeLocation } = useAuth()
@@ -61,7 +61,7 @@ export function POSPage() {
       if (activeLocation?.id) {
         const { data: zoneLinks } = await supabase
           .from('delivery_zone_locations')
-          .select('zone:delivery_zones(id, name, price)')
+          .select('zone:delivery_zones(id, name, delivery_fee)')
           .eq('location_id', activeLocation.id)
         
         const zones = zoneLinks
@@ -72,7 +72,7 @@ export function POSPage() {
         // Admin - fetch all zones
         const { data: allZones } = await supabase
           .from('delivery_zones')
-          .select('id, name, price')
+          .select('id, name, delivery_fee')
           .eq('is_active', true)
           .order('name')
         setDeliveryZones(allZones || [])
@@ -136,7 +136,7 @@ export function POSPage() {
   const subtotalAfterDiscount = Math.max(0, itemsSubtotal - discountAmount)
   
   // Delivery charge
-  const deliveryCharge = (orderType === 'delivery' && selectedZone) ? selectedZone.price : 0
+  const deliveryCharge = (orderType === 'delivery' && selectedZone) ? selectedZone.delivery_fee : 0
   
   // Subtotal (items after discount + delivery)
   const subtotal = subtotalAfterDiscount + deliveryCharge
@@ -182,20 +182,19 @@ export function POSPage() {
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
-          company_id: profile?.company_id,
           location_id: activeLocation?.id || null,
           customer_id: selectedCustomer.type === 'named' ? selectedCustomer.customer?.id : null,
           user_id: profile?.id,
           order_type: orderType,
           status: orderType === 'delivery' ? 'pending' : 'completed',
           subtotal: itemsSubtotal,
-          discount: discountAmount,
+          discount_amount: discountAmount,
           delivery_fee: deliveryCharge,
-          tax,
+          tax_amount: tax,
           total,
           payment_method: paymentMethod,
           payment_status: 'paid',
-          notes: notes || null,
+          internal_notes: notes || null,
         })
         .select()
         .single()
@@ -209,8 +208,9 @@ export function POSPage() {
         product_name: item.product.name,
         quantity: item.quantity,
         unit_price: item.product.base_price,
-        subtotal: item.product.base_price * item.quantity,
-        notes: item.notes || null,
+        line_total: item.product.base_price * item.quantity,
+        item_notes: item.notes || null,
+        is_taxable: item.product.is_taxable,
       }))
 
       const { error: itemsError } = await supabase
@@ -449,7 +449,7 @@ export function POSPage() {
                   <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                     <div>
                       <p className="font-medium text-gray-800">{selectedZone.name}</p>
-                      <p className="text-sm text-green-600">${selectedZone.price.toFixed(2)}</p>
+                      <p className="text-sm text-green-600">${selectedZone.delivery_fee.toFixed(2)}</p>
                     </div>
                     <button
                       onClick={() => setShowZoneModal(true)}
@@ -696,7 +696,7 @@ export function POSPage() {
                       <p className="font-medium text-gray-800">{zone.name}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-green-600">${zone.price.toFixed(2)}</p>
+                      <p className="font-bold text-green-600">${zone.delivery_fee.toFixed(2)}</p>
                       {selectedZone?.id === zone.id && <span className="text-green-600 text-sm">✓ Selected</span>}
                     </div>
                   </button>

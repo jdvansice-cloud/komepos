@@ -1,14 +1,13 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
-interface Promo { id: string; name: string; description: string; discount_type: 'percentage' | 'fixed'; discount_value: number; free_delivery: boolean; start_date: string; end_date: string; is_active: boolean }
+interface Promo { id: string; name: string; description: string; discount_type: 'percentage' | 'fixed' | 'free_delivery'; discount_value: number; start_date: string; end_date: string; is_active: boolean }
 
 interface FormData {
   name: string
   description: string
-  discount_type: 'percentage' | 'fixed'
+  discount_type: 'percentage' | 'fixed' | 'free_delivery'
   discount_value: number
-  free_delivery: boolean
   start_date: string
   end_date: string
   is_active: boolean
@@ -19,7 +18,7 @@ export function PromosPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Promo | null>(null)
-  const [formData, setFormData] = useState<FormData>({ name: '', description: '', discount_type: 'percentage', discount_value: 10, free_delivery: false, start_date: '', end_date: '', is_active: true })
+  const [formData, setFormData] = useState<FormData>({ name: '', description: '', discount_type: 'percentage', discount_value: 10, start_date: '', end_date: '', is_active: true })
 
   useEffect(() => { fetchPromos() }, [])
 
@@ -30,8 +29,8 @@ export function PromosPage() {
   }
 
   function openModal(promo?: Promo) {
-    if (promo) { setEditing(promo); setFormData({ name: promo.name, description: promo.description || '', discount_type: promo.discount_type, discount_value: promo.discount_value, free_delivery: promo.free_delivery, start_date: promo.start_date?.split('T')[0] || '', end_date: promo.end_date?.split('T')[0] || '', is_active: promo.is_active }) }
-    else { setEditing(null); setFormData({ name: '', description: '', discount_type: 'percentage', discount_value: 10, free_delivery: false, start_date: new Date().toISOString().split('T')[0], end_date: '', is_active: true }) }
+    if (promo) { setEditing(promo); setFormData({ name: promo.name, description: promo.description || '', discount_type: promo.discount_type, discount_value: promo.discount_value, start_date: promo.start_date?.split('T')[0] || '', end_date: promo.end_date?.split('T')[0] || '', is_active: promo.is_active }) }
+    else { setEditing(null); setFormData({ name: '', description: '', discount_type: 'percentage', discount_value: 10, start_date: new Date().toISOString().split('T')[0], end_date: '', is_active: true }) }
     setShowModal(true)
   }
 
@@ -77,8 +76,11 @@ export function PromosPage() {
                     </div>
                     <p className="text-gray-600 mt-1">{promo.description}</p>
                     <div className="flex gap-4 mt-3">
-                      <span className="text-sm bg-purple-100 text-purple-700 px-2 py-1 rounded">{promo.discount_type === 'percentage' ? `${promo.discount_value}% off` : `$${promo.discount_value} off`}</span>
-                      {promo.free_delivery && <span className="text-sm bg-green-100 text-green-700 px-2 py-1 rounded">Free Delivery</span>}
+                      <span className="text-sm bg-purple-100 text-purple-700 px-2 py-1 rounded">
+                        {promo.discount_type === 'percentage' ? `${promo.discount_value}% off` : 
+                         promo.discount_type === 'fixed' ? `$${promo.discount_value} off` : 
+                         '🚚 Free Delivery'}
+                      </span>
                     </div>
                     <p className="text-xs text-gray-400 mt-2">{new Date(promo.start_date).toLocaleDateString()}{promo.end_date && ` - ${new Date(promo.end_date).toLocaleDateString()}`}</p>
                   </div>
@@ -101,17 +103,16 @@ export function PromosPage() {
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={2} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Type</label><select value={formData.discount_type} onChange={(e) => setFormData({ ...formData, discount_type: e.target.value as 'percentage' | 'fixed' })} className="w-full border border-gray-300 rounded-lg px-4 py-2"><option value="percentage">Percentage</option><option value="fixed">Fixed Amount</option></select></div>
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Value</label><input type="number" min="0" value={formData.discount_value} onChange={(e) => setFormData({ ...formData, discount_value: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Type</label><select value={formData.discount_type} onChange={(e) => setFormData({ ...formData, discount_type: e.target.value as 'percentage' | 'fixed' | 'free_delivery' })} className="w-full border border-gray-300 rounded-lg px-4 py-2"><option value="percentage">Percentage</option><option value="fixed">Fixed Amount</option><option value="free_delivery">Free Delivery</option></select></div>
+                {formData.discount_type !== 'free_delivery' && (
+                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Value</label><input type="number" min="0" value={formData.discount_value} onChange={(e) => setFormData({ ...formData, discount_value: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label><input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">End Date</label><input type="date" value={formData.end_date} onChange={(e) => setFormData({ ...formData, end_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
               </div>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2"><input type="checkbox" checked={formData.free_delivery} onChange={(e) => setFormData({ ...formData, free_delivery: e.target.checked })} className="rounded" /><span className="text-sm">Free Delivery</span></label>
-                <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" /><span className="text-sm">Active</span></label>
-              </div>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" /><span className="text-sm">Active</span></label>
               <div className="flex justify-end gap-2 pt-4">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
                 <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">{editing ? 'Save' : 'Add'}</button>

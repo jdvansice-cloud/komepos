@@ -5,10 +5,10 @@ type TabType = 'company' | 'locations' | 'delivery' | 'users'
 type UserRole = 'admin' | 'supervisor' | 'operator'
 
 interface Company { id: string; name: string; ruc: string; dv: string; itbms_rate: number; address: string; phone: string; email: string }
-interface Location { id: string; name: string; address: string; phone: string; is_active: boolean; opening_hours: string; accepts_delivery: boolean; delivery_fee: number; latitude: number | null; longitude: number | null }
+interface Location { id: string; name: string; address: string; phone: string; is_active: boolean; opening_time: string; closing_time: string; delivery_enabled: boolean; latitude: number | null; longitude: number | null }
 interface LocationOption { id: string; name: string }
 interface User { id: string; full_name: string; email: string; role: UserRole; is_active: boolean }
-interface DeliveryZone { id: string; name: string; price: number; is_active: boolean; locations: LocationOption[] }
+interface DeliveryZone { id: string; name: string; delivery_fee: number; is_active: boolean; locations: LocationOption[] }
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('company')
@@ -138,7 +138,7 @@ function LocationsSettings() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Location | null>(null)
-  const [formData, setFormData] = useState({ name: '', address: '', phone: '', is_active: true, opening_hours: '', accepts_delivery: true, delivery_fee: 3.00, latitude: '', longitude: '' })
+  const [formData, setFormData] = useState({ name: '', address: '', phone: '', is_active: true, opening_time: '', closing_time: '', delivery_enabled: true, latitude: '', longitude: '' })
 
   useEffect(() => { fetchLocations() }, [])
 
@@ -149,8 +149,8 @@ function LocationsSettings() {
   }
 
   function openModal(location?: Location) {
-    if (location) { setEditing(location); setFormData({ name: location.name, address: location.address || '', phone: location.phone || '', is_active: location.is_active, opening_hours: location.opening_hours || '', accepts_delivery: location.accepts_delivery, delivery_fee: location.delivery_fee || 3.00, latitude: location.latitude?.toString() || '', longitude: location.longitude?.toString() || '' }) }
-    else { setEditing(null); setFormData({ name: '', address: '', phone: '', is_active: true, opening_hours: '', accepts_delivery: true, delivery_fee: 3.00, latitude: '', longitude: '' }) }
+    if (location) { setEditing(location); setFormData({ name: location.name, address: location.address || '', phone: location.phone || '', is_active: location.is_active, opening_time: location.opening_time || '', closing_time: location.closing_time || '', delivery_enabled: location.delivery_enabled, latitude: location.latitude?.toString() || '', longitude: location.longitude?.toString() || '' }) }
+    else { setEditing(null); setFormData({ name: '', address: '', phone: '', is_active: true, opening_time: '', closing_time: '', delivery_enabled: true, latitude: '', longitude: '' }) }
     setShowModal(true)
   }
 
@@ -162,9 +162,9 @@ function LocationsSettings() {
         address: formData.address,
         phone: formData.phone,
         is_active: formData.is_active,
-        opening_hours: formData.opening_hours,
-        accepts_delivery: formData.accepts_delivery,
-        delivery_fee: formData.delivery_fee,
+        opening_time: formData.opening_time || null,
+        closing_time: formData.closing_time || null,
+        delivery_enabled: formData.delivery_enabled,
         latitude: formData.latitude ? parseFloat(formData.latitude) : null,
         longitude: formData.longitude ? parseFloat(formData.longitude) : null,
       }
@@ -202,8 +202,8 @@ function LocationsSettings() {
                 <p className="text-sm text-gray-600 mt-1">{location.address}</p>
                 <p className="text-sm text-gray-500">{location.phone}</p>
                 <div className="flex gap-3 mt-2 text-xs">
-                  {location.accepts_delivery && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded">Delivery: ${location.delivery_fee?.toFixed(2)}</span>}
-                  {location.opening_hours && <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded">{location.opening_hours}</span>}
+                  {location.delivery_enabled && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded">🚚 Delivery</span>}
+                  {(location.opening_time || location.closing_time) && <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded">{location.opening_time || '?'} - {location.closing_time || '?'}</span>}
                   {location.latitude && location.longitude && (
                     <a 
                       href={`https://www.google.com/maps?q=${location.latitude},${location.longitude}`} 
@@ -257,14 +257,14 @@ function LocationsSettings() {
                 </button>
               </div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone</label><input type="tel" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Opening Hours</label><input type="text" value={formData.opening_hours} onChange={(e) => setFormData({ ...formData, opening_hours: e.target.value })} placeholder="Mon-Fri 9am-9pm" className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
               <div className="grid grid-cols-2 gap-4">
-                <label className="flex items-center gap-2"><input type="checkbox" checked={formData.accepts_delivery} onChange={(e) => setFormData({ ...formData, accepts_delivery: e.target.checked })} className="rounded" /><span className="text-sm">Accepts Delivery</span></label>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Opening Time</label><input type="time" value={formData.opening_time} onChange={(e) => setFormData({ ...formData, opening_time: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Closing Time</label><input type="time" value={formData.closing_time} onChange={(e) => setFormData({ ...formData, closing_time: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <label className="flex items-center gap-2"><input type="checkbox" checked={formData.delivery_enabled} onChange={(e) => setFormData({ ...formData, delivery_enabled: e.target.checked })} className="rounded" /><span className="text-sm">Delivery Enabled</span></label>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" /><span className="text-sm">Active</span></label>
               </div>
-              {formData.accepts_delivery && (
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Delivery Fee ($)</label><input type="number" step="0.01" min="0" value={formData.delivery_fee} onChange={(e) => setFormData({ ...formData, delivery_fee: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
-              )}
               <div className="flex justify-end gap-2 pt-4">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
                 <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">{editing ? 'Save' : 'Add'}</button>
@@ -284,14 +284,14 @@ function DeliverySettings() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<DeliveryZone | null>(null)
-  const [formData, setFormData] = useState<{ name: string; price: string; location_ids: string[]; is_active: boolean }>({ name: '', price: '', location_ids: [], is_active: true })
+  const [formData, setFormData] = useState<{ name: string; delivery_fee: string; location_ids: string[]; is_active: boolean }>({ name: '', delivery_fee: '', location_ids: [], is_active: true })
 
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
     try {
       const [zonesRes, locationsRes] = await Promise.all([
-        supabase.from('delivery_zones').select('id, name, price, is_active').order('name'),
+        supabase.from('delivery_zones').select('id, name, delivery_fee, is_active').order('name'),
         supabase.from('locations').select('id, name').order('name'),
       ])
       
@@ -318,24 +318,31 @@ function DeliverySettings() {
       setEditing(zone)
       setFormData({ 
         name: zone.name, 
-        price: zone.price.toString(), 
+        delivery_fee: zone.delivery_fee.toString(), 
         location_ids: zone.locations.map(l => l.id), 
         is_active: zone.is_active 
       })
     } else {
       setEditing(null)
-      setFormData({ name: '', price: '', location_ids: [], is_active: true })
+      setFormData({ name: '', delivery_fee: '', location_ids: [], is_active: true })
     }
     setShowModal(true)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    
+    if (formData.location_ids.length === 0) {
+      alert('Please assign at least one location')
+      return
+    }
+    
     try {
       const zoneData = {
         name: formData.name,
-        price: parseFloat(formData.price) || 0,
+        delivery_fee: parseFloat(formData.delivery_fee) || 0,
         is_active: formData.is_active,
+        location_id: formData.location_ids[0], // Primary location (required field)
       }
 
       if (editing) {
@@ -415,7 +422,7 @@ function DeliverySettings() {
             {zones.map(zone => (
               <tr key={zone.id} className="hover:bg-gray-50">
                 <td className="px-6 py-4 font-medium text-gray-800">{zone.name}</td>
-                <td className="px-6 py-4 text-gray-600">${zone.price.toFixed(2)}</td>
+                <td className="px-6 py-4 text-gray-600">${zone.delivery_fee.toFixed(2)}</td>
                 <td className="px-6 py-4">
                   {zone.locations.length === 0 ? (
                     <span className="text-red-500 text-sm">None assigned</span>
@@ -454,7 +461,7 @@ function DeliverySettings() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Price ($) *</label>
-                <input type="number" step="0.01" min="0" value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="3.00" required />
+                <input type="number" step="0.01" min="0" value={formData.delivery_fee} onChange={(e) => setFormData({ ...formData, delivery_fee: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="3.00" required />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Assigned Locations</label>
