@@ -339,27 +339,45 @@ function DeliverySettings() {
       }
 
       if (editing) {
-        await supabase.from('delivery_zones').update(zoneData).eq('id', editing.id)
+        const { error: updateError } = await supabase.from('delivery_zones').update(zoneData).eq('id', editing.id)
+        if (updateError) {
+          console.error('Update error:', updateError)
+          alert('Error updating zone: ' + updateError.message)
+          return
+        }
         
         // Update location assignments
         await supabase.from('delivery_zone_locations').delete().eq('zone_id', editing.id)
         if (formData.location_ids.length > 0) {
-          await supabase.from('delivery_zone_locations').insert(
+          const { error: locError } = await supabase.from('delivery_zone_locations').insert(
             formData.location_ids.map(loc_id => ({ zone_id: editing.id, location_id: loc_id }))
           )
+          if (locError) console.error('Location assignment error:', locError)
         }
       } else {
         const { data: company } = await supabase.from('companies').select('id').single()
-        const { data: newZone } = await supabase
+        if (!company?.id) {
+          alert('Error: Company not found')
+          return
+        }
+        
+        const { data: newZone, error: insertError } = await supabase
           .from('delivery_zones')
-          .insert({ ...zoneData, company_id: company?.id })
+          .insert({ ...zoneData, company_id: company.id })
           .select()
           .single()
         
+        if (insertError) {
+          console.error('Insert error:', insertError)
+          alert('Error creating zone: ' + insertError.message)
+          return
+        }
+        
         if (newZone && formData.location_ids.length > 0) {
-          await supabase.from('delivery_zone_locations').insert(
+          const { error: locError } = await supabase.from('delivery_zone_locations').insert(
             formData.location_ids.map(loc_id => ({ zone_id: newZone.id, location_id: loc_id }))
           )
+          if (locError) console.error('Location assignment error:', locError)
         }
       }
       setShowModal(false)
