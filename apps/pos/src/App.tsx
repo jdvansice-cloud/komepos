@@ -35,8 +35,8 @@ function AppRoutes() {
           <Route path="/settings" element={<ProtectedRoute allowedRoles={['admin']}><SettingsPage /></ProtectedRoute>} />
         </Route>
         
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<Navigate to="/pos" replace />} />
+        <Route path="*" element={<Navigate to="/pos" replace />} />
       </Routes>
     </>
   )

@@ -3,8 +3,8 @@ import { Link, useLocation, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const menuItems = [
-  { path: '/dashboard', icon: '📊', label: 'Dashboard' },
   { path: '/pos', icon: '💳', label: 'POS', highlight: true },
+  { path: '/dashboard', icon: '📊', label: 'Dashboard' },
   { path: '/orders', icon: '📋', label: 'Orders' },
   { path: '/products', icon: '🍔', label: 'Products' },
   { path: '/categories', icon: '📁', label: 'Categories' },

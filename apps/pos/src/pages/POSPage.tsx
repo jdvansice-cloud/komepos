@@ -19,7 +19,7 @@ export function POSPage() {
   
   // Customer selection
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  const [selectedCustomer, setSelectedCustomer] = useState<{ type: 'walk-in' | 'named'; customer: Customer | null } | null>(null)
   const [showCustomerModal, setShowCustomerModal] = useState(false)
   const [customerSearch, setCustomerSearch] = useState('')
   
@@ -90,14 +90,6 @@ export function POSPage() {
     ))
   }
 
-  function clearCart() {
-    if (cart.length === 0) return
-    if (confirm('Clear all items from cart?')) {
-      setCart([])
-      setSelectedCustomer(null)
-    }
-  }
-
   // Calculations
   const subtotal = cart.reduce((sum, item) => sum + (item.product.base_price * item.quantity), 0)
   const taxableAmount = cart.reduce((sum, item) => 
@@ -115,7 +107,7 @@ export function POSPage() {
   })
 
   async function processPayment() {
-    if (cart.length === 0) return
+    if (cart.length === 0 || !selectedCustomer) return
     setProcessing(true)
     
     try {
@@ -125,7 +117,7 @@ export function POSPage() {
         .insert({
           company_id: profile?.company_id,
           location_id: activeLocation?.id || null,
-          customer_id: selectedCustomer?.id || null,
+          customer_id: selectedCustomer.type === 'named' ? selectedCustomer.customer?.id : null,
           user_id: profile?.id,
           order_type: orderType,
           status: 'completed',
@@ -134,7 +126,7 @@ export function POSPage() {
           total,
           payment_method: paymentMethod,
           payment_status: 'paid',
-          notes: orderType === 'phone' ? `Phone order - ${selectedCustomer?.phone || 'No phone'}` : null,
+          notes: selectedCustomer.type === 'walk-in' ? 'Walk-in customer' : null,
         })
         .select()
         .single()
@@ -159,7 +151,8 @@ export function POSPage() {
       if (itemsError) throw itemsError
 
       // Success - show receipt
-      alert(`✅ Order #${order.id.slice(-6).toUpperCase()} completed!\n\nTotal: $${total.toFixed(2)}\nPayment: ${paymentMethod.toUpperCase()}${paymentMethod === 'cash' && change > 0 ? `\nChange: $${change.toFixed(2)}` : ''}`)
+      const customerName = selectedCustomer.type === 'walk-in' ? 'Walk-in' : selectedCustomer.customer?.full_name
+      alert(`✅ Order #${order.id.slice(-6).toUpperCase()} completed!\n\nCustomer: ${customerName}\nTotal: $${total.toFixed(2)}\nPayment: ${paymentMethod.toUpperCase()}${paymentMethod === 'cash' && change > 0 ? `\nChange: $${change.toFixed(2)}` : ''}`)
       
       // Reset
       setCart([])
@@ -272,23 +265,44 @@ export function POSPage() {
         <div className="p-4 border-b">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-gray-600">Customer</span>
-            <button
-              onClick={() => setShowCustomerModal(true)}
-              className="text-sm text-blue-600 hover:text-blue-800"
-            >
-              {selectedCustomer ? 'Change' : '+ Add'}
-            </button>
+            {selectedCustomer && (
+              <button
+                onClick={() => setSelectedCustomer(null)}
+                className="text-sm text-red-500 hover:text-red-700"
+              >
+                Remove
+              </button>
+            )}
           </div>
           {selectedCustomer ? (
-            <div className="flex items-center justify-between bg-blue-50 rounded-lg px-3 py-2">
-              <div>
-                <p className="font-medium text-gray-800">{selectedCustomer.full_name}</p>
-                <p className="text-xs text-gray-500">{selectedCustomer.phone}</p>
-              </div>
-              <button onClick={() => setSelectedCustomer(null)} className="text-gray-400 hover:text-gray-600">✕</button>
+            <div className="bg-blue-50 rounded-lg px-3 py-2">
+              {selectedCustomer.type === 'walk-in' ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">🚶</span>
+                  <p className="font-medium text-gray-800">Walk-in Customer</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="font-medium text-gray-800">{selectedCustomer.customer?.full_name}</p>
+                  <p className="text-xs text-gray-500">{selectedCustomer.customer?.phone}</p>
+                </div>
+              )}
             </div>
           ) : (
-            <p className="text-sm text-gray-400">Walk-in customer</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setSelectedCustomer({ type: 'walk-in', customer: null })}
+                className="py-2 px-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition"
+              >
+                🚶 Walk-in
+              </button>
+              <button
+                onClick={() => setShowCustomerModal(true)}
+                className="py-2 px-3 bg-blue-100 hover:bg-blue-200 rounded-lg text-sm font-medium text-blue-700 transition"
+              >
+                👤 Search
+              </button>
+            </div>
           )}
         </div>
 
@@ -309,7 +323,16 @@ export function POSPage() {
                       <h4 className="font-medium text-gray-800">{item.product.name}</h4>
                       <p className="text-sm text-gray-500">${item.product.base_price.toFixed(2)} each</p>
                     </div>
-                    <p className="font-bold text-gray-800">${(item.product.base_price * item.quantity).toFixed(2)}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-gray-800">${(item.product.base_price * item.quantity).toFixed(2)}</p>
+                      <button
+                        onClick={() => setCart(prev => prev.filter(i => i.product.id !== item.product.id))}
+                        className="text-red-500 hover:text-red-700 hover:bg-red-50 rounded p-1"
+                        title="Remove item"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="flex items-center bg-white rounded-lg border">
@@ -357,22 +380,16 @@ export function POSPage() {
               <span className="text-blue-600">${total.toFixed(2)}</span>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={clearCart}
-              disabled={cart.length === 0}
-              className="px-4 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Clear
-            </button>
-            <button
-              onClick={() => setShowPaymentModal(true)}
-              disabled={cart.length === 0}
-              className="px-4 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Charge ${total.toFixed(2)}
-            </button>
-          </div>
+          {!selectedCustomer && cart.length > 0 && (
+            <p className="text-sm text-amber-600 mb-3 text-center">⚠️ Add a customer to checkout</p>
+          )}
+          <button
+            onClick={() => setShowPaymentModal(true)}
+            disabled={cart.length === 0 || !selectedCustomer}
+            className="w-full px-4 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Charge ${total.toFixed(2)}
+          </button>
         </div>
       </div>
 
@@ -393,7 +410,7 @@ export function POSPage() {
               {customers.map(customer => (
                 <button
                   key={customer.id}
-                  onClick={() => { setSelectedCustomer(customer); setShowCustomerModal(false); setCustomerSearch('') }}
+                  onClick={() => { setSelectedCustomer({ type: 'named', customer }); setShowCustomerModal(false); setCustomerSearch(''); setCustomers([]) }}
                   className="w-full text-left p-3 rounded-lg hover:bg-gray-100 transition"
                 >
                   <p className="font-medium text-gray-800">{customer.full_name}</p>
