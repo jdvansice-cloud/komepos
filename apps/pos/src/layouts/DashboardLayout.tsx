@@ -8,6 +8,7 @@ const menuItems = [
   { path: '/orders', icon: '📋', label: 'Orders' },
   { path: '/customers', icon: '👥', label: 'Customers' },
   { path: '/promos', icon: '🎉', label: 'Active Promos' },
+  { path: '/shifts', icon: '💰', label: 'Cash Register' },
   { path: '/reports', icon: '📈', label: 'Reports', roles: ['admin', 'supervisor'] },
   { path: '/settings', icon: '⚙️', label: 'Settings', roles: ['admin'] },
 ]

@@ -9,6 +9,7 @@ import { POSPage } from './pages/POSPage'
 import { OrdersPage } from './pages/OrdersPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { ActivePromosPage } from './pages/ActivePromosPage'
+import { ShiftsPage } from './pages/ShiftsPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { SettingsPage } from './pages/SettingsPage'
 
@@ -27,6 +28,7 @@ function AppRoutes() {
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/promos" element={<ActivePromosPage />} />
+          <Route path="/shifts" element={<ShiftsPage />} />
           <Route path="/reports" element={<ProtectedRoute allowedRoles={['admin', 'supervisor']}><ReportsPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute allowedRoles={['admin']}><SettingsPage /></ProtectedRoute>} />
         </Route>
