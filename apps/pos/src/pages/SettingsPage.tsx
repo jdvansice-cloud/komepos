@@ -606,6 +606,9 @@ function UsersSettings() {
         }
         const companyId = company.id
 
+        // Save current admin session BEFORE signUp (signUp will change the session)
+        const { data: { session: adminSession } } = await supabase.auth.getSession()
+        
         // Create auth user with signUp
         // Note: Email confirmation should be disabled in Supabase Auth settings
         const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -617,18 +620,26 @@ function UsersSettings() {
         })
 
         if (authError) {
+          // Restore admin session on error
+          if (adminSession) await supabase.auth.setSession(adminSession)
           alert('Error creating user: ' + authError.message)
           return
         }
 
         if (!authData.user) {
+          if (adminSession) await supabase.auth.setSession(adminSession)
           alert('Error: No user returned from signup')
           return
         }
 
         const newUserId = authData.user.id
 
-        // Create user profile immediately
+        // Restore admin session BEFORE database operations (so RLS policies work for admin)
+        if (adminSession) {
+          await supabase.auth.setSession(adminSession)
+        }
+
+        // Create user profile (now as admin)
         const { error: profileError } = await supabase.from('users').insert({
           id: newUserId,
           company_id: companyId,
@@ -643,13 +654,14 @@ function UsersSettings() {
           return
         }
 
-        // Assign locations
+        // Assign locations (now as admin, so RLS allows it)
         if (formData.location_ids.length > 0) {
           const { error: locError } = await supabase.from('user_locations').insert(
             formData.location_ids.map(loc_id => ({ user_id: newUserId, location_id: loc_id }))
           )
           if (locError) {
             console.error('Error assigning locations:', locError)
+            alert('User created but location assignment failed: ' + locError.message)
           }
         }
 
