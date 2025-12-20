@@ -6,6 +6,7 @@ interface Category { id: string; name: string; sort_order: number }
 interface Product { id: string; name: string; description: string; base_price: number; image_url: string; category_id: string; is_taxable: boolean }
 interface CartItem { product: Product; quantity: number; notes: string }
 interface Customer { id: string; full_name: string; phone: string; email: string }
+interface DeliveryZone { id: string; name: string; price: number }
 
 export function POSPage() {
   const { profile, activeLocation } = useAuth()
@@ -24,7 +25,15 @@ export function POSPage() {
   const [customerSearch, setCustomerSearch] = useState('')
   
   // Order type
-  const [orderType, setOrderType] = useState<'dine_in' | 'takeout' | 'phone'>('dine_in')
+  const [orderType, setOrderType] = useState<'dine_in' | 'takeout' | 'phone' | 'delivery'>('dine_in')
+  
+  // Delivery
+  const [deliveryZones, setDeliveryZones] = useState<DeliveryZone[]>([])
+  const [selectedZone, setSelectedZone] = useState<DeliveryZone | null>(null)
+  
+  // Discount
+  const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent')
+  const [discountValue, setDiscountValue] = useState('')
   
   // Payment
   const [showPaymentModal, setShowPaymentModal] = useState(false)
@@ -34,7 +43,7 @@ export function POSPage() {
   // Tax rate
   const [taxRate, setTaxRate] = useState(0.07)
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => { fetchData() }, [activeLocation])
 
   async function fetchData() {
     try {
@@ -46,6 +55,27 @@ export function POSPage() {
       setCategories(categoriesRes.data || [])
       setProducts(productsRes.data || [])
       if (companyRes.data?.itbms_rate) setTaxRate(companyRes.data.itbms_rate)
+      
+      // Fetch delivery zones for current location
+      if (activeLocation?.id) {
+        const { data: zoneLinks } = await supabase
+          .from('delivery_zone_locations')
+          .select('zone:delivery_zones(id, name, price)')
+          .eq('location_id', activeLocation.id)
+        
+        const zones = zoneLinks
+          ?.map((zl: any) => zl.zone)
+          .filter((z: any) => z && z.is_active !== false) || []
+        setDeliveryZones(zones)
+      } else {
+        // Admin - fetch all zones
+        const { data: allZones } = await supabase
+          .from('delivery_zones')
+          .select('id, name, price')
+          .eq('is_active', true)
+          .order('name')
+        setDeliveryZones(allZones || [])
+      }
     } catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
   }
@@ -91,11 +121,36 @@ export function POSPage() {
   }
 
   // Calculations
-  const subtotal = cart.reduce((sum, item) => sum + (item.product.base_price * item.quantity), 0)
-  const taxableAmount = cart.reduce((sum, item) => 
+  const itemsSubtotal = cart.reduce((sum, item) => sum + (item.product.base_price * item.quantity), 0)
+  
+  // Discount calculation
+  const parsedDiscount = parseFloat(discountValue) || 0
+  const discountAmount = discountValue 
+    ? (discountType === 'percent' 
+        ? itemsSubtotal * (parsedDiscount / 100) 
+        : parsedDiscount)
+    : 0
+  
+  // Subtotal after discount
+  const subtotalAfterDiscount = Math.max(0, itemsSubtotal - discountAmount)
+  
+  // Delivery charge
+  const deliveryCharge = (orderType === 'delivery' && selectedZone) ? selectedZone.price : 0
+  
+  // Subtotal (items after discount + delivery)
+  const subtotal = subtotalAfterDiscount + deliveryCharge
+  
+  // Tax calculation (taxable items + delivery)
+  const taxableItemsAmount = cart.reduce((sum, item) => 
     item.product.is_taxable ? sum + (item.product.base_price * item.quantity) : sum, 0
   )
+  // Proportional discount on taxable items
+  const discountRatio = itemsSubtotal > 0 ? discountAmount / itemsSubtotal : 0
+  const taxableAfterDiscount = taxableItemsAmount * (1 - discountRatio)
+  const taxableAmount = taxableAfterDiscount + deliveryCharge // Delivery is taxable
   const tax = taxableAmount * taxRate
+  
+  // Total
   const total = subtotal + tax
   const change = cashReceived ? parseFloat(cashReceived) - total : 0
 
@@ -108,9 +163,20 @@ export function POSPage() {
 
   async function processPayment() {
     if (cart.length === 0 || !selectedCustomer) return
+    if (orderType === 'delivery' && !selectedZone) {
+      alert('Please select a delivery zone')
+      return
+    }
     setProcessing(true)
     
     try {
+      // Build notes
+      const notes = [
+        selectedCustomer.type === 'walk-in' ? 'Walk-in customer' : null,
+        discountAmount > 0 ? `Discount: ${discountType === 'percent' ? discountValue + '%' : '$' + discountValue}` : null,
+        orderType === 'delivery' && selectedZone ? `Delivery Zone: ${selectedZone.name}` : null,
+      ].filter(Boolean).join(' | ')
+
       // Create order
       const { data: order, error: orderError } = await supabase
         .from('orders')
@@ -120,13 +186,15 @@ export function POSPage() {
           customer_id: selectedCustomer.type === 'named' ? selectedCustomer.customer?.id : null,
           user_id: profile?.id,
           order_type: orderType,
-          status: 'completed',
-          subtotal,
+          status: orderType === 'delivery' ? 'pending' : 'completed',
+          subtotal: itemsSubtotal,
+          discount: discountAmount,
+          delivery_fee: deliveryCharge,
           tax,
           total,
           payment_method: paymentMethod,
           payment_status: 'paid',
-          notes: selectedCustomer.type === 'walk-in' ? 'Walk-in customer' : null,
+          notes: notes || null,
         })
         .select()
         .single()
@@ -157,6 +225,8 @@ export function POSPage() {
       // Reset
       setCart([])
       setSelectedCustomer(null)
+      setSelectedZone(null)
+      setDiscountValue('')
       setShowPaymentModal(false)
       setCashReceived('')
       
@@ -190,17 +260,20 @@ export function POSPage() {
               />
             </div>
             <div className="flex gap-2">
-              {(['dine_in', 'takeout', 'phone'] as const).map(type => (
+              {(['dine_in', 'takeout', 'phone', 'delivery'] as const).map(type => (
                 <button
                   key={type}
-                  onClick={() => setOrderType(type)}
+                  onClick={() => {
+                    setOrderType(type)
+                    if (type !== 'delivery') setSelectedZone(null)
+                  }}
                   className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
                     orderType === type
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                 >
-                  {type === 'dine_in' ? '🍽️ Dine In' : type === 'takeout' ? '🥡 Takeout' : '📞 Phone'}
+                  {type === 'dine_in' ? '🍽️ Dine In' : type === 'takeout' ? '🥡 Takeout' : type === 'phone' ? '📞 Phone' : '🚚 Delivery'}
                 </button>
               ))}
             </div>
@@ -364,9 +437,89 @@ export function POSPage() {
           )}
         </div>
 
+        {/* Delivery Zone & Discount */}
+        {cart.length > 0 && (
+          <div className="border-t p-4 space-y-3">
+            {/* Delivery Zone Selector */}
+            {orderType === 'delivery' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Delivery Zone</label>
+                <select
+                  value={selectedZone?.id || ''}
+                  onChange={(e) => {
+                    const zone = deliveryZones.find(z => z.id === e.target.value)
+                    setSelectedZone(zone || null)
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">Select zone...</option>
+                  {deliveryZones.map(zone => (
+                    <option key={zone.id} value={zone.id}>{zone.name} - ${zone.price.toFixed(2)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            
+            {/* Manual Discount */}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Discount</label>
+              <div className="flex gap-2">
+                <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+                  <button
+                    onClick={() => setDiscountType('percent')}
+                    className={`px-3 py-2 text-sm ${discountType === 'percent' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+                  >
+                    %
+                  </button>
+                  <button
+                    onClick={() => setDiscountType('fixed')}
+                    className={`px-3 py-2 text-sm ${discountType === 'fixed' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+                  >
+                    $
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max={discountType === 'percent' ? '100' : itemsSubtotal.toString()}
+                  value={discountValue}
+                  onChange={(e) => setDiscountValue(e.target.value)}
+                  placeholder={discountType === 'percent' ? '0%' : '$0.00'}
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+                {discountValue && (
+                  <button
+                    onClick={() => setDiscountValue('')}
+                    className="px-2 text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Totals & Actions */}
         <div className="border-t p-4 bg-gray-50">
           <div className="space-y-2 mb-4">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Items</span>
+              <span className="text-gray-800">${itemsSubtotal.toFixed(2)}</span>
+            </div>
+            {discountAmount > 0 && (
+              <div className="flex justify-between text-sm text-green-600">
+                <span>Discount ({discountType === 'percent' ? discountValue + '%' : '$' + discountValue})</span>
+                <span>-${discountAmount.toFixed(2)}</span>
+              </div>
+            )}
+            {deliveryCharge > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Delivery ({selectedZone?.name})</span>
+                <span className="text-gray-800">${deliveryCharge.toFixed(2)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm">
               <span className="text-gray-600">Subtotal</span>
               <span className="text-gray-800">${subtotal.toFixed(2)}</span>
@@ -383,9 +536,12 @@ export function POSPage() {
           {!selectedCustomer && cart.length > 0 && (
             <p className="text-sm text-amber-600 mb-3 text-center">⚠️ Add a customer to checkout</p>
           )}
+          {orderType === 'delivery' && !selectedZone && cart.length > 0 && (
+            <p className="text-sm text-amber-600 mb-3 text-center">⚠️ Select a delivery zone</p>
+          )}
           <button
             onClick={() => setShowPaymentModal(true)}
-            disabled={cart.length === 0 || !selectedCustomer}
+            disabled={cart.length === 0 || !selectedCustomer || (orderType === 'delivery' && !selectedZone)}
             className="w-full px-4 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Charge ${total.toFixed(2)}
