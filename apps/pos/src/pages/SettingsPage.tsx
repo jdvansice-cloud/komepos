@@ -598,7 +598,16 @@ function UsersSettings() {
           return
         }
 
-        // Create auth user
+        // Get company_id FIRST before anything else
+        const { data: company, error: companyError } = await supabase.from('companies').select('id').single()
+        if (companyError || !company?.id) {
+          alert('Error: Company not found')
+          return
+        }
+        const companyId = company.id
+
+        // Create auth user with signUp
+        // Note: Email confirmation should be disabled in Supabase Auth settings
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
@@ -613,17 +622,16 @@ function UsersSettings() {
         }
 
         if (!authData.user) {
-          alert('Error: No user returned')
+          alert('Error: No user returned from signup')
           return
         }
 
-        // Get company_id
-        const { data: company } = await supabase.from('companies').select('id').single()
+        const newUserId = authData.user.id
 
-        // Create user profile
+        // Create user profile immediately
         const { error: profileError } = await supabase.from('users').insert({
-          id: authData.user.id,
-          company_id: company?.id,
+          id: newUserId,
+          company_id: companyId,
           email: formData.email,
           full_name: formData.full_name,
           role: formData.role,
@@ -637,12 +645,15 @@ function UsersSettings() {
 
         // Assign locations
         if (formData.location_ids.length > 0) {
-          await supabase.from('user_locations').insert(
-            formData.location_ids.map(loc_id => ({ user_id: authData.user!.id, location_id: loc_id }))
+          const { error: locError } = await supabase.from('user_locations').insert(
+            formData.location_ids.map(loc_id => ({ user_id: newUserId, location_id: loc_id }))
           )
+          if (locError) {
+            console.error('Error assigning locations:', locError)
+          }
         }
 
-        alert(`User created! They can login with:\nEmail: ${formData.email}\nPassword: ${formData.password}`)
+        alert(`User created successfully!\n\nEmail: ${formData.email}\nPassword: ${formData.password}\n\nThey can now login to the POS.`)
       }
       setShowModal(false)
       fetchData()
