@@ -30,6 +30,7 @@ export function POSPage() {
   // Delivery
   const [deliveryZones, setDeliveryZones] = useState<DeliveryZone[]>([])
   const [selectedZone, setSelectedZone] = useState<DeliveryZone | null>(null)
+  const [showZoneModal, setShowZoneModal] = useState(false)
   
   // Discount
   const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent')
@@ -444,19 +445,27 @@ export function POSPage() {
             {orderType === 'delivery' && (
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Delivery Zone</label>
-                <select
-                  value={selectedZone?.id || ''}
-                  onChange={(e) => {
-                    const zone = deliveryZones.find(z => z.id === e.target.value)
-                    setSelectedZone(zone || null)
-                  }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                >
-                  <option value="">Select zone...</option>
-                  {deliveryZones.map(zone => (
-                    <option key={zone.id} value={zone.id}>{zone.name} - ${zone.price.toFixed(2)}</option>
-                  ))}
-                </select>
+                {selectedZone ? (
+                  <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                    <div>
+                      <p className="font-medium text-gray-800">{selectedZone.name}</p>
+                      <p className="text-sm text-green-600">${selectedZone.price.toFixed(2)}</p>
+                    </div>
+                    <button
+                      onClick={() => setShowZoneModal(true)}
+                      className="text-blue-600 hover:text-blue-800 text-sm"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowZoneModal(true)}
+                    className="w-full py-2 px-3 bg-orange-100 hover:bg-orange-200 border border-orange-300 rounded-lg text-sm font-medium text-orange-700 transition"
+                  >
+                    🚚 Select Delivery Zone
+                  </button>
+                )}
               </div>
             )}
             
@@ -653,6 +662,62 @@ export function POSPage() {
                 className="py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {processing ? 'Processing...' : 'Complete Payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delivery Zone Modal */}
+      {showZoneModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold mb-2">Select Delivery Zone</h2>
+            <p className="text-sm text-gray-500 mb-4">Choose the delivery zone for this order</p>
+            
+            {deliveryZones.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500 mb-2">No delivery zones available</p>
+                <p className="text-sm text-gray-400">Add zones in Settings → Delivery Zones</p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {deliveryZones.map(zone => (
+                  <button
+                    key={zone.id}
+                    onClick={() => { setSelectedZone(zone); setShowZoneModal(false) }}
+                    className={`w-full p-4 border rounded-lg text-left flex items-center justify-between transition ${
+                      selectedZone?.id === zone.id 
+                        ? 'border-green-500 bg-green-50' 
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div>
+                      <p className="font-medium text-gray-800">{zone.name}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-green-600">${zone.price.toFixed(2)}</p>
+                      {selectedZone?.id === zone.id && <span className="text-green-600 text-sm">✓ Selected</span>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            
+            <div className="mt-4 flex gap-2">
+              {selectedZone && (
+                <button
+                  onClick={() => { setSelectedZone(null); setShowZoneModal(false) }}
+                  className="flex-1 py-2 text-red-600 hover:bg-red-50 rounded-lg"
+                >
+                  Remove Zone
+                </button>
+              )}
+              <button
+                onClick={() => setShowZoneModal(false)}
+                className="flex-1 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                Cancel
               </button>
             </div>
           </div>
