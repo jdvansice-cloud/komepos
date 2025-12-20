@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 
 const menuItems = [
   { path: '/dashboard', icon: '📊', label: 'Dashboard' },
+  { path: '/pos', icon: '💳', label: 'POS', highlight: true },
   { path: '/orders', icon: '📋', label: 'Orders' },
   { path: '/products', icon: '🍔', label: 'Products' },
   { path: '/categories', icon: '📁', label: 'Categories' },
@@ -68,6 +69,7 @@ export function DashboardLayout() {
         <nav className="flex-1 p-4 space-y-2">
           {filteredMenu.map(item => {
             const isActive = location.pathname === item.path
+            const isHighlight = 'highlight' in item && item.highlight
             return (
               <Link
                 key={item.path}
@@ -75,6 +77,8 @@ export function DashboardLayout() {
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg transition ${
                   isActive
                     ? 'bg-blue-600 text-white'
+                    : isHighlight
+                    ? 'bg-green-600 text-white hover:bg-green-700'
                     : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                 }`}
               >
