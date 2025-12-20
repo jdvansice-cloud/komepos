@@ -7,10 +7,8 @@ import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { POSPage } from './pages/POSPage'
 import { OrdersPage } from './pages/OrdersPage'
-import { ProductsPage } from './pages/ProductsPage'
-import { CategoriesPage } from './pages/CategoriesPage'
 import { CustomersPage } from './pages/CustomersPage'
-import { PromosPage } from './pages/PromosPage'
+import { ActivePromosPage } from './pages/ActivePromosPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { SettingsPage } from './pages/SettingsPage'
 
@@ -27,10 +25,8 @@ function AppRoutes() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/pos" element={<POSPage />} />
           <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/products" element={<ProductsPage />} />
-          <Route path="/categories" element={<CategoriesPage />} />
           <Route path="/customers" element={<CustomersPage />} />
-          <Route path="/promos" element={<PromosPage />} />
+          <Route path="/promos" element={<ActivePromosPage />} />
           <Route path="/reports" element={<ProtectedRoute allowedRoles={['admin', 'supervisor']}><ReportsPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute allowedRoles={['admin']}><SettingsPage /></ProtectedRoute>} />
         </Route>

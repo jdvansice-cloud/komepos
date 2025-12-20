@@ -6,10 +6,8 @@ const menuItems = [
   { path: '/pos', icon: '💳', label: 'POS', highlight: true },
   { path: '/dashboard', icon: '📊', label: 'Dashboard' },
   { path: '/orders', icon: '📋', label: 'Orders' },
-  { path: '/products', icon: '🍔', label: 'Products' },
-  { path: '/categories', icon: '📁', label: 'Categories' },
   { path: '/customers', icon: '👥', label: 'Customers' },
-  { path: '/promos', icon: '🎉', label: 'Promotions' },
+  { path: '/promos', icon: '🎉', label: 'Active Promos' },
   { path: '/reports', icon: '📈', label: 'Reports', roles: ['admin', 'supervisor'] },
   { path: '/settings', icon: '⚙️', label: 'Settings', roles: ['admin'] },
 ]

@@ -168,9 +168,19 @@ export function POSPage() {
       alert('Please select a delivery zone')
       return
     }
+    
+    // Ensure we have a location
+    if (!activeLocation?.id) {
+      alert('Please select a location first')
+      return
+    }
+    
     setProcessing(true)
     
     try {
+      // Generate order number (timestamp + random)
+      const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
+      
       // Build notes
       const notes = [
         selectedCustomer.type === 'walk-in' ? 'Walk-in customer' : null,
@@ -182,7 +192,8 @@ export function POSPage() {
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
-          location_id: activeLocation?.id || null,
+          order_number: orderNumber,
+          location_id: activeLocation.id,
           customer_id: selectedCustomer.type === 'named' ? selectedCustomer.customer?.id : null,
           user_id: profile?.id,
           order_type: orderType,
@@ -221,7 +232,7 @@ export function POSPage() {
 
       // Success - show receipt
       const customerName = selectedCustomer.type === 'walk-in' ? 'Walk-in' : selectedCustomer.customer?.full_name
-      alert(`✅ Order #${order.id.slice(-6).toUpperCase()} completed!\n\nCustomer: ${customerName}\nTotal: $${total.toFixed(2)}\nPayment: ${paymentMethod.toUpperCase()}${paymentMethod === 'cash' && change > 0 ? `\nChange: $${change.toFixed(2)}` : ''}`)
+      alert(`✅ Order ${order.order_number} completed!\n\nCustomer: ${customerName}\nTotal: $${total.toFixed(2)}\nPayment: ${paymentMethod.toUpperCase()}${paymentMethod === 'cash' && change > 0 ? `\nChange: $${change.toFixed(2)}` : ''}`)
       
       // Reset
       setCart([])

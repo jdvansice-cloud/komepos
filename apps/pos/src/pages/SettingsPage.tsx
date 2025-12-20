@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
-type TabType = 'company' | 'locations' | 'delivery' | 'users'
+type TabType = 'company' | 'locations' | 'delivery' | 'users' | 'categories' | 'products' | 'promos'
 type UserRole = 'admin' | 'supervisor' | 'operator'
 
 interface Company { id: string; name: string; ruc: string; dv: string; itbms_rate: number; address: string; phone: string; email: string }
@@ -9,6 +9,9 @@ interface Location { id: string; name: string; address: string; phone: string; i
 interface LocationOption { id: string; name: string }
 interface User { id: string; full_name: string; email: string; role: UserRole; is_active: boolean }
 interface DeliveryZone { id: string; name: string; delivery_fee: number; is_active: boolean; locations: LocationOption[] }
+interface Category { id: string; name: string; description: string; image_url: string; sort_order: number; is_active: boolean }
+interface Product { id: string; name: string; description: string; base_price: number; image_url: string; is_taxable: boolean; is_active: boolean; has_options: boolean; category_id: string; category?: { name: string } }
+interface Promo { id: string; name: string; description: string; discount_type: 'percentage' | 'fixed' | 'free_delivery'; discount_value: number; start_date: string; end_date: string; is_active: boolean }
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('company')
@@ -17,6 +20,9 @@ export function SettingsPage() {
     { id: 'company' as TabType, label: 'Company', icon: '🏢' },
     { id: 'locations' as TabType, label: 'Locations', icon: '📍' },
     { id: 'delivery' as TabType, label: 'Delivery Zones', icon: '🚚' },
+    { id: 'categories' as TabType, label: 'Categories', icon: '📁' },
+    { id: 'products' as TabType, label: 'Products', icon: '🍔' },
+    { id: 'promos' as TabType, label: 'Promotions', icon: '🎉' },
     { id: 'users' as TabType, label: 'Users', icon: '👤' },
   ]
 
@@ -24,17 +30,17 @@ export function SettingsPage() {
     <div className="p-6">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-800">Settings</h1>
-        <p className="text-gray-600">Manage your company, locations, and users</p>
+        <p className="text-gray-600">Manage your restaurant configuration</p>
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200 mb-6">
-        <nav className="flex gap-4">
+      <div className="border-b border-gray-200 mb-6 overflow-x-auto">
+        <nav className="flex gap-2">
           {tabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium transition ${
+              className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium transition whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -51,6 +57,9 @@ export function SettingsPage() {
       {activeTab === 'company' && <CompanySettings />}
       {activeTab === 'locations' && <LocationsSettings />}
       {activeTab === 'delivery' && <DeliverySettings />}
+      {activeTab === 'categories' && <CategoriesSettings />}
+      {activeTab === 'products' && <ProductsSettings />}
+      {activeTab === 'promos' && <PromosSettings />}
       {activeTab === 'users' && <UsersSettings />}
     </div>
   )
@@ -797,6 +806,359 @@ function UsersSettings() {
                 </p>
               )}
               
+              <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" /><span className="text-sm">Active</span></label>
+              <div className="flex justify-end gap-2 pt-4">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">{editing ? 'Save' : 'Add'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Categories Settings Component
+function CategoriesSettings() {
+  const [categories, setCategories] = useState<Category[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [editing, setEditing] = useState<Category | null>(null)
+  const [formData, setFormData] = useState({ name: '', description: '', image_url: '', sort_order: 0, is_active: true })
+
+  useEffect(() => { fetchCategories() }, [])
+
+  async function fetchCategories() {
+    try {
+      const { data } = await supabase.from('categories').select('*').order('sort_order')
+      setCategories(data || [])
+    } catch (error) { console.error('Error:', error) }
+    finally { setLoading(false) }
+  }
+
+  function openModal(category?: Category) {
+    if (category) {
+      setEditing(category)
+      setFormData({ name: category.name, description: category.description || '', image_url: category.image_url || '', sort_order: category.sort_order, is_active: category.is_active })
+    } else {
+      setEditing(null)
+      setFormData({ name: '', description: '', image_url: '', sort_order: categories.length, is_active: true })
+    }
+    setShowModal(true)
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    try {
+      if (editing) { await supabase.from('categories').update(formData).eq('id', editing.id) }
+      else {
+        const { data: company } = await supabase.from('companies').select('id').single()
+        await supabase.from('categories').insert({ ...formData, company_id: company?.id })
+      }
+      setShowModal(false)
+      fetchCategories()
+    } catch (error) { console.error('Error:', error) }
+  }
+
+  async function deleteCategory(id: string) {
+    if (!confirm('Delete this category? Products in this category will need to be reassigned.')) return
+    await supabase.from('categories').delete().eq('id', id)
+    fetchCategories()
+  }
+
+  if (loading) return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-semibold text-gray-800">Menu Categories</h2>
+        <button onClick={() => openModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ Add Category</button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {categories.map(category => (
+          <div key={category.id} className="bg-white rounded-lg shadow overflow-hidden">
+            {category.image_url && <img src={category.image_url} alt={category.name} className="w-full h-32 object-cover" />}
+            <div className="p-4">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-semibold text-gray-800">{category.name}</h3>
+                  <p className="text-sm text-gray-500 mt-1">{category.description}</p>
+                </div>
+                <span className={`px-2 py-0.5 rounded-full text-xs ${category.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{category.is_active ? 'Active' : 'Inactive'}</span>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => openModal(category)} className="flex-1 text-blue-600 border border-blue-600 px-3 py-1 rounded-lg hover:bg-blue-50 text-sm">Edit</button>
+                <button onClick={() => deleteCategory(category.id)} className="text-red-600 border border-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-sm">Delete</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {categories.length === 0 && <p className="text-gray-500 text-center py-8">No categories yet. Add your first category.</p>}
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold mb-4">{editing ? 'Edit Category' : 'Add Category'}</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={2} /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Image URL</label><input type="url" value={formData.image_url} onChange={(e) => setFormData({ ...formData, image_url: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Sort Order</label><input type="number" value={formData.sort_order} onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" /><span className="text-sm">Active</span></label>
+              <div className="flex justify-end gap-2 pt-4">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">{editing ? 'Save' : 'Add'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Products Settings Component
+function ProductsSettings() {
+  const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [editing, setEditing] = useState<Product | null>(null)
+  const [filter, setFilter] = useState('')
+  const [formData, setFormData] = useState({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: '' })
+
+  useEffect(() => { fetchData() }, [])
+
+  async function fetchData() {
+    try {
+      const [productsRes, categoriesRes] = await Promise.all([
+        supabase.from('products').select('*, category:categories(name)').order('name'),
+        supabase.from('categories').select('id, name').order('name'),
+      ])
+      setProducts(productsRes.data || [])
+      setCategories(categoriesRes.data || [])
+    } catch (error) { console.error('Error:', error) }
+    finally { setLoading(false) }
+  }
+
+  function openModal(product?: Product) {
+    if (product) {
+      setEditing(product)
+      setFormData({ name: product.name, description: product.description || '', base_price: product.base_price, image_url: product.image_url || '', is_taxable: product.is_taxable, is_active: product.is_active, category_id: product.category_id })
+    } else {
+      setEditing(null)
+      setFormData({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: categories[0]?.id || '' })
+    }
+    setShowModal(true)
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    try {
+      if (editing) {
+        await supabase.from('products').update(formData).eq('id', editing.id)
+      } else {
+        const { data: company } = await supabase.from('companies').select('id').single()
+        await supabase.from('products').insert({ ...formData, company_id: company?.id })
+      }
+      setShowModal(false)
+      fetchData()
+    } catch (error) { console.error('Error:', error) }
+  }
+
+  async function toggleActive(product: Product) {
+    await supabase.from('products').update({ is_active: !product.is_active }).eq('id', product.id)
+    fetchData()
+  }
+
+  const filteredProducts = products.filter(p => p.name.toLowerCase().includes(filter.toLowerCase()) || p.category?.name?.toLowerCase().includes(filter.toLowerCase()))
+
+  if (loading) return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-semibold text-gray-800">Menu Products</h2>
+        <button onClick={() => openModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ Add Product</button>
+      </div>
+
+      <div className="mb-4">
+        <input type="text" placeholder="Search products..." value={filter} onChange={(e) => setFilter(e.target.value)} className="w-full max-w-md border border-gray-300 rounded-lg px-4 py-2" />
+      </div>
+
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-gray-50 border-b">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {filteredProducts.map(product => (
+              <tr key={product.id} className="hover:bg-gray-50">
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    {product.image_url ? <img src={product.image_url} alt="" className="w-10 h-10 rounded-lg object-cover" /> : <div className="w-10 h-10 bg-gray-200 rounded-lg flex items-center justify-center">🍽️</div>}
+                    <span className="font-medium text-gray-800">{product.name}</span>
+                  </div>
+                </td>
+                <td className="px-6 py-4 text-gray-600">{product.category?.name}</td>
+                <td className="px-6 py-4 font-medium">${product.base_price.toFixed(2)}</td>
+                <td className="px-6 py-4">
+                  <span className={`px-2 py-1 rounded-full text-xs ${product.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{product.is_active ? 'Active' : 'Inactive'}</span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <button onClick={() => openModal(product)} className="text-blue-600 hover:text-blue-800 mr-3">Edit</button>
+                  <button onClick={() => toggleActive(product)} className="text-gray-600 hover:text-gray-800">{product.is_active ? 'Disable' : 'Enable'}</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filteredProducts.length === 0 && <p className="text-gray-500 text-center py-8">No products found</p>}
+      </div>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
+            <h2 className="text-xl font-bold mb-4">{editing ? 'Edit Product' : 'Add Product'}</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={2} /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Price *</label><input type="number" step="0.01" min="0" value={formData.base_price} onChange={(e) => setFormData({ ...formData, base_price: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Category *</label><select value={formData.category_id} onChange={(e) => setFormData({ ...formData, category_id: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required><option value="">Select category</option>{categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></div>
+              </div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Image URL</label><input type="url" value={formData.image_url} onChange={(e) => setFormData({ ...formData, image_url: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="https://..." /></div>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_taxable} onChange={(e) => setFormData({ ...formData, is_taxable: e.target.checked })} className="rounded" /><span className="text-sm">Taxable (ITBMS)</span></label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" /><span className="text-sm">Active</span></label>
+              </div>
+              <div className="flex justify-end gap-2 pt-4">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">{editing ? 'Save' : 'Add'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Promotions Settings Component
+function PromosSettings() {
+  const [promos, setPromos] = useState<Promo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [editing, setEditing] = useState<Promo | null>(null)
+  const [formData, setFormData] = useState<{ name: string; description: string; discount_type: 'percentage' | 'fixed' | 'free_delivery'; discount_value: number; start_date: string; end_date: string; is_active: boolean }>({ name: '', description: '', discount_type: 'percentage', discount_value: 10, start_date: '', end_date: '', is_active: true })
+
+  useEffect(() => { fetchPromos() }, [])
+
+  async function fetchPromos() {
+    try { const { data } = await supabase.from('promos').select('*').order('created_at', { ascending: false }); setPromos(data || []) }
+    catch (error) { console.error('Error:', error) }
+    finally { setLoading(false) }
+  }
+
+  function openModal(promo?: Promo) {
+    if (promo) { setEditing(promo); setFormData({ name: promo.name, description: promo.description || '', discount_type: promo.discount_type, discount_value: promo.discount_value, start_date: promo.start_date?.split('T')[0] || '', end_date: promo.end_date?.split('T')[0] || '', is_active: promo.is_active }) }
+    else { setEditing(null); setFormData({ name: '', description: '', discount_type: 'percentage', discount_value: 10, start_date: new Date().toISOString().split('T')[0], end_date: '', is_active: true }) }
+    setShowModal(true)
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    try {
+      if (editing) { await supabase.from('promos').update(formData).eq('id', editing.id) }
+      else { const { data: company } = await supabase.from('companies').select('id').single(); await supabase.from('promos').insert({ ...formData, company_id: company?.id }) }
+      setShowModal(false); fetchPromos()
+    } catch (error) { console.error('Error:', error) }
+  }
+
+  async function toggleActive(promo: Promo) { await supabase.from('promos').update({ is_active: !promo.is_active }).eq('id', promo.id); fetchPromos() }
+
+  function getStatus(promo: Promo) {
+    const now = new Date(), start = new Date(promo.start_date), end = promo.end_date ? new Date(promo.end_date) : null
+    if (!promo.is_active) return { label: 'Inactive', color: 'bg-gray-100 text-gray-700' }
+    if (now < start) return { label: 'Scheduled', color: 'bg-blue-100 text-blue-700' }
+    if (end && now > end) return { label: 'Expired', color: 'bg-red-100 text-red-700' }
+    return { label: 'Active', color: 'bg-green-100 text-green-700' }
+  }
+
+  if (loading) return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-semibold text-gray-800">Promotions & Discounts</h2>
+        <button onClick={() => openModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ Add Promo</button>
+      </div>
+
+      {promos.length === 0 ? (
+        <p className="text-gray-500 text-center py-8">No promotions yet. Create your first promo.</p>
+      ) : (
+        <div className="grid gap-4">
+          {promos.map(promo => {
+            const status = getStatus(promo)
+            return (
+              <div key={promo.id} className="bg-white rounded-lg shadow p-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-semibold text-gray-800">{promo.name}</h3>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>{status.label}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">{promo.description}</p>
+                    <div className="flex gap-3 mt-2">
+                      <span className="text-sm bg-purple-100 text-purple-700 px-2 py-0.5 rounded">
+                        {promo.discount_type === 'percentage' ? `${promo.discount_value}% off` : 
+                         promo.discount_type === 'fixed' ? `$${promo.discount_value} off` : 
+                         '🚚 Free Delivery'}
+                      </span>
+                      <span className="text-xs text-gray-400">{new Date(promo.start_date).toLocaleDateString()}{promo.end_date && ` - ${new Date(promo.end_date).toLocaleDateString()}`}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => openModal(promo)} className="text-blue-600 hover:bg-blue-50 px-3 py-1 rounded-lg text-sm">Edit</button>
+                    <button onClick={() => toggleActive(promo)} className="text-gray-600 hover:bg-gray-100 px-3 py-1 rounded-lg text-sm">{promo.is_active ? 'Disable' : 'Enable'}</button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold mb-4">{editing ? 'Edit Promo' : 'Add Promo'}</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Promo Name *</label><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="e.g., Summer Special, Happy Hour" required /></div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Instructions for Operators</label>
+                <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={3} placeholder="Explain how operators should apply this promo. e.g., 'Ask customer for the code. Apply 10% discount manually on combos only. Valid for dine-in orders.'" />
+                <p className="text-xs text-gray-500 mt-1">This will be shown to operators in the Active Promos section</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Type</label><select value={formData.discount_type} onChange={(e) => setFormData({ ...formData, discount_type: e.target.value as 'percentage' | 'fixed' | 'free_delivery' })} className="w-full border border-gray-300 rounded-lg px-4 py-2"><option value="percentage">Percentage</option><option value="fixed">Fixed Amount</option><option value="free_delivery">Free Delivery</option></select></div>
+                {formData.discount_type !== 'free_delivery' && (
+                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Value</label><input type="number" min="0" value={formData.discount_value} onChange={(e) => setFormData({ ...formData, discount_value: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label><input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">End Date</label><input type="date" value={formData.end_date} onChange={(e) => setFormData({ ...formData, end_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
+              </div>
               <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" /><span className="text-sm">Active</span></label>
               <div className="flex justify-end gap-2 pt-4">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
