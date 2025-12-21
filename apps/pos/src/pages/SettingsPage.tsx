@@ -1057,32 +1057,104 @@ function ProductsSettings() {
 // Promotions Settings Component
 function PromosSettings() {
   const [promos, setPromos] = useState<Promo[]>([])
+  const [allProducts, setAllProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Promo | null>(null)
   const [formData, setFormData] = useState<{ name: string; description: string; discount_type: PromoDiscountType; discount_value: number; start_date: string; end_date: string; is_active: boolean }>({ name: '', description: '', discount_type: 'order_percentage', discount_value: 10, start_date: '', end_date: '', is_active: true })
+  const [selectedProducts, setSelectedProducts] = useState<string[]>([])
+  const [productSearch, setProductSearch] = useState('')
+  const [promoProductCounts, setPromoProductCounts] = useState<Record<string, number>>({})
 
-  useEffect(() => { fetchPromos() }, [])
+  useEffect(() => { fetchPromos(); fetchProducts() }, [])
 
   async function fetchPromos() {
-    try { const { data } = await supabase.from('promos').select('*').order('created_at', { ascending: false }); setPromos(data || []) }
+    try { 
+      const { data } = await supabase.from('promos').select('*').order('created_at', { ascending: false })
+      setPromos(data || [])
+      
+      // Get product counts for each promo
+      const { data: promoProdData } = await supabase.from('promo_products').select('promo_id')
+      if (promoProdData) {
+        const counts: Record<string, number> = {}
+        promoProdData.forEach(pp => {
+          counts[pp.promo_id] = (counts[pp.promo_id] || 0) + 1
+        })
+        setPromoProductCounts(counts)
+      }
+    }
     catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
   }
 
-  function openModal(promo?: Promo) {
-    if (promo) { setEditing(promo); setFormData({ name: promo.name, description: promo.description || '', discount_type: promo.discount_type, discount_value: promo.discount_value, start_date: promo.start_date?.split('T')[0] || '', end_date: promo.end_date?.split('T')[0] || '', is_active: promo.is_active }) }
-    else { setEditing(null); setFormData({ name: '', description: '', discount_type: 'order_percentage', discount_value: 10, start_date: new Date().toISOString().split('T')[0], end_date: '', is_active: true }) }
+  async function fetchProducts() {
+    const { data } = await supabase.from('products').select('*, category:categories(name)').eq('is_active', true).order('name')
+    setAllProducts(data || [])
+  }
+
+  async function openModal(promo?: Promo) {
+    if (promo) { 
+      setEditing(promo)
+      setFormData({ name: promo.name, description: promo.description || '', discount_type: promo.discount_type, discount_value: promo.discount_value, start_date: promo.start_date?.split('T')[0] || '', end_date: promo.end_date?.split('T')[0] || '', is_active: promo.is_active })
+      
+      // Load selected products for this promo
+      const { data: promoProducts } = await supabase.from('promo_products').select('product_id').eq('promo_id', promo.id)
+      setSelectedProducts(promoProducts?.map(pp => pp.product_id) || [])
+    } else { 
+      setEditing(null)
+      setFormData({ name: '', description: '', discount_type: 'order_percentage', discount_value: 10, start_date: new Date().toISOString().split('T')[0], end_date: '', is_active: true })
+      setSelectedProducts([])
+    }
+    setProductSearch('')
     setShowModal(true)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    
+    // Validate: item discounts need at least one product
+    const isItemDiscount = formData.discount_type === 'item_percentage' || formData.discount_type === 'item_fixed'
+    if (isItemDiscount && selectedProducts.length === 0) {
+      alert('Please select at least one product for item discounts')
+      return
+    }
+    
     try {
-      if (editing) { await supabase.from('promos').update(formData).eq('id', editing.id) }
-      else { const { data: company } = await supabase.from('companies').select('id').single(); await supabase.from('promos').insert({ ...formData, company_id: company?.id }) }
-      setShowModal(false); fetchPromos()
-    } catch (error) { console.error('Error:', error) }
+      let promoId: string
+      
+      if (editing) { 
+        await supabase.from('promos').update(formData).eq('id', editing.id)
+        promoId = editing.id
+      } else { 
+        const { data: company } = await supabase.from('companies').select('id').single()
+        const { data: newPromo } = await supabase.from('promos').insert({ ...formData, company_id: company?.id }).select().single()
+        promoId = newPromo.id
+      }
+      
+      // Update promo_products for item discounts
+      if (isItemDiscount) {
+        // Delete existing product associations
+        await supabase.from('promo_products').delete().eq('promo_id', promoId)
+        
+        // Insert new product associations
+        if (selectedProducts.length > 0) {
+          const promoProducts = selectedProducts.map(productId => ({
+            promo_id: promoId,
+            product_id: productId
+          }))
+          await supabase.from('promo_products').insert(promoProducts)
+        }
+      } else {
+        // Clear product associations if not an item discount
+        await supabase.from('promo_products').delete().eq('promo_id', promoId)
+      }
+      
+      setShowModal(false)
+      fetchPromos()
+    } catch (error) { 
+      console.error('Error:', error)
+      alert('Error saving promo')
+    }
   }
 
   async function toggleActive(promo: Promo) { await supabase.from('promos').update({ is_active: !promo.is_active }).eq('id', promo.id); fetchPromos() }
@@ -1106,6 +1178,12 @@ function PromosSettings() {
     }
   }
 
+  const isItemDiscount = formData.discount_type === 'item_percentage' || formData.discount_type === 'item_fixed'
+  const filteredProducts = allProducts.filter(p => 
+    p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
+    p.category?.name?.toLowerCase().includes(productSearch.toLowerCase())
+  )
+
   if (loading) return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
 
   return (
@@ -1122,6 +1200,8 @@ function PromosSettings() {
           {promos.map(promo => {
             const status = getStatus(promo)
             const typeDisplay = getPromoTypeDisplay(promo.discount_type, promo.discount_value)
+            const productCount = promoProductCounts[promo.id] || 0
+            const isItemPromo = promo.discount_type === 'item_percentage' || promo.discount_type === 'item_fixed'
             return (
               <div key={promo.id} className="bg-white rounded-lg shadow p-4">
                 <div className="flex justify-between items-start">
@@ -1131,11 +1211,16 @@ function PromosSettings() {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>{status.label}</span>
                     </div>
                     <p className="text-sm text-gray-600 mt-1">{promo.description}</p>
-                    <div className="flex gap-3 mt-2 items-center">
+                    <div className="flex gap-3 mt-2 items-center flex-wrap">
                       <span className={`text-sm px-2 py-0.5 rounded flex items-center gap-1 ${typeDisplay.color}`}>
                         <span>{typeDisplay.icon}</span>
                         {typeDisplay.label}
                       </span>
+                      {isItemPromo && (
+                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                          {productCount} product{productCount !== 1 ? 's' : ''}
+                        </span>
+                      )}
                       <span className="text-xs text-gray-400">{new Date(promo.start_date).toLocaleDateString()}{promo.end_date && ` - ${new Date(promo.end_date).toLocaleDateString()}`}</span>
                     </div>
                   </div>
@@ -1152,7 +1237,7 @@ function PromosSettings() {
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">{editing ? 'Edit Promo' : 'Add Promo'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Promo Name *</label><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="e.g., Summer Special, Happy Hour" required /></div>
@@ -1206,6 +1291,78 @@ function PromosSettings() {
                     Discount Value {formData.discount_type.includes('percentage') ? '(%)' : '($)'}
                   </label>
                   <input type="number" min="0" step={formData.discount_type.includes('percentage') ? '1' : '0.01'} value={formData.discount_value} onChange={(e) => setFormData({ ...formData, discount_value: parseFloat(e.target.value) || 0 })} className="w-full border border-gray-300 rounded-lg px-4 py-2" />
+                </div>
+              )}
+              
+              {/* Product Selector for Item Discounts */}
+              {isItemDiscount && (
+                <div className="border border-green-200 rounded-lg p-4 bg-green-50">
+                  <label className="block text-sm font-medium text-green-800 mb-2">
+                    🏷️ Select Products for Discount * ({selectedProducts.length} selected)
+                  </label>
+                  
+                  {/* Search */}
+                  <input 
+                    type="text" 
+                    placeholder="Search products..." 
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 mb-3"
+                  />
+                  
+                  {/* Selected Products */}
+                  {selectedProducts.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs text-green-700 mb-2">Selected:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedProducts.map(productId => {
+                          const product = allProducts.find(p => p.id === productId)
+                          return product ? (
+                            <span key={productId} className="inline-flex items-center gap-1 bg-green-600 text-white px-2 py-1 rounded text-sm">
+                              {product.name}
+                              <button type="button" onClick={() => setSelectedProducts(prev => prev.filter(id => id !== productId))} className="hover:text-green-200">×</button>
+                            </span>
+                          ) : null
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Product List */}
+                  <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white">
+                    {filteredProducts.length === 0 ? (
+                      <p className="text-gray-500 text-center py-4 text-sm">No products found</p>
+                    ) : (
+                      filteredProducts.map(product => {
+                        const isSelected = selectedProducts.includes(product.id)
+                        return (
+                          <div 
+                            key={product.id} 
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedProducts(prev => prev.filter(id => id !== product.id))
+                              } else {
+                                setSelectedProducts(prev => [...prev, product.id])
+                              }
+                            }}
+                            className={`flex items-center gap-3 p-2 cursor-pointer border-b last:border-b-0 ${isSelected ? 'bg-green-100' : 'hover:bg-gray-50'}`}
+                          >
+                            <input type="checkbox" checked={isSelected} readOnly className="rounded" />
+                            {product.image_url ? (
+                              <img src={product.image_url} alt="" className="w-8 h-8 rounded object-cover" />
+                            ) : (
+                              <div className="w-8 h-8 bg-gray-200 rounded flex items-center justify-center text-xs">🍽️</div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-gray-800 text-sm truncate">{product.name}</p>
+                              <p className="text-xs text-gray-500">{product.category?.name} • ${product.base_price.toFixed(2)}</p>
+                            </div>
+                            {isSelected && <span className="text-green-600">✓</span>}
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
                 </div>
               )}
               

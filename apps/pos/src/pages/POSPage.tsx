@@ -4,9 +4,10 @@ import { useAuth } from '../context/AuthContext'
 
 interface Category { id: string; name: string; sort_order: number }
 interface Product { id: string; name: string; description: string; base_price: number; image_url: string; category_id: string; is_taxable: boolean }
-interface CartItem { product: Product; quantity: number; notes: string }
+interface CartItem { product: Product; quantity: number; notes: string; promoDiscount?: number; promoName?: string }
 interface Customer { id: string; full_name: string; phone: string; email: string }
 interface DeliveryZone { id: string; name: string; delivery_fee: number }
+interface ItemPromo { id: string; name: string; discount_type: 'item_percentage' | 'item_fixed'; discount_value: number; product_ids: string[] }
 
 export function POSPage() {
   const { profile, activeLocation } = useAuth()
@@ -43,6 +44,9 @@ export function POSPage() {
   
   // Tax rate
   const [taxRate, setTaxRate] = useState(0.07)
+  
+  // Active item promos
+  const [itemPromos, setItemPromos] = useState<ItemPromo[]>([])
 
   useEffect(() => { fetchData() }, [activeLocation])
 
@@ -56,6 +60,36 @@ export function POSPage() {
       setCategories(categoriesRes.data || [])
       setProducts(productsRes.data || [])
       if (companyRes.data?.itbms_rate) setTaxRate(companyRes.data.itbms_rate)
+      
+      // Fetch active item promos
+      const now = new Date().toISOString()
+      const { data: promos } = await supabase
+        .from('promos')
+        .select('id, name, discount_type, discount_value')
+        .eq('is_active', true)
+        .in('discount_type', ['item_percentage', 'item_fixed'])
+        .lte('start_date', now)
+        .or(`end_date.is.null,end_date.gte.${now}`)
+      
+      if (promos && promos.length > 0) {
+        // Get products for each promo
+        const promoIds = promos.map(p => p.id)
+        const { data: promoProducts } = await supabase
+          .from('promo_products')
+          .select('promo_id, product_id')
+          .in('promo_id', promoIds)
+        
+        const itemPromosData: ItemPromo[] = promos.map(p => ({
+          id: p.id,
+          name: p.name,
+          discount_type: p.discount_type as 'item_percentage' | 'item_fixed',
+          discount_value: p.discount_value,
+          product_ids: promoProducts?.filter(pp => pp.promo_id === p.id).map(pp => pp.product_id) || []
+        }))
+        setItemPromos(itemPromosData)
+      } else {
+        setItemPromos([])
+      }
       
       // Fetch delivery zones for current location
       if (activeLocation?.id) {
@@ -91,7 +125,35 @@ export function POSPage() {
     setCustomers(data || [])
   }
 
+  // Find if a product has an active promo
+  function getProductPromo(productId: string): { discount: number; promoName: string } | null {
+    for (const promo of itemPromos) {
+      if (promo.product_ids.includes(productId)) {
+        return {
+          promoName: promo.name,
+          discount: promo.discount_value
+        }
+      }
+    }
+    return null
+  }
+  
+  // Calculate promo discount for a product
+  function calculatePromoDiscount(product: Product): { discount: number; promoName: string } | null {
+    for (const promo of itemPromos) {
+      if (promo.product_ids.includes(product.id)) {
+        const discount = promo.discount_type === 'item_percentage'
+          ? product.base_price * (promo.discount_value / 100)
+          : Math.min(promo.discount_value, product.base_price) // Fixed discount can't exceed price
+        return { discount, promoName: promo.name }
+      }
+    }
+    return null
+  }
+
   function addToCart(product: Product) {
+    const promoInfo = calculatePromoDiscount(product)
+    
     setCart(prev => {
       const existing = prev.find(item => item.product.id === product.id)
       if (existing) {
@@ -101,7 +163,13 @@ export function POSPage() {
             : item
         )
       }
-      return [...prev, { product, quantity: 1, notes: '' }]
+      return [...prev, { 
+        product, 
+        quantity: 1, 
+        notes: '',
+        promoDiscount: promoInfo?.discount,
+        promoName: promoInfo?.promoName
+      }]
     })
   }
 
@@ -122,18 +190,30 @@ export function POSPage() {
   }
 
   // Calculations
-  const itemsSubtotal = cart.reduce((sum, item) => sum + (item.product.base_price * item.quantity), 0)
+  // Items subtotal (full prices before any discounts)
+  const itemsSubtotalFull = cart.reduce((sum, item) => sum + (item.product.base_price * item.quantity), 0)
   
-  // Discount calculation
+  // Promo discounts (automatic item discounts)
+  const promoDiscountTotal = cart.reduce((sum, item) => 
+    sum + ((item.promoDiscount || 0) * item.quantity), 0
+  )
+  
+  // Items subtotal after promo discounts
+  const itemsSubtotal = itemsSubtotalFull - promoDiscountTotal
+  
+  // Manual discount calculation
   const parsedDiscount = parseFloat(discountValue) || 0
-  const discountAmount = discountValue 
+  const manualDiscountAmount = discountValue 
     ? (discountType === 'percent' 
         ? itemsSubtotal * (parsedDiscount / 100) 
         : parsedDiscount)
     : 0
   
-  // Subtotal after discount
-  const subtotalAfterDiscount = Math.max(0, itemsSubtotal - discountAmount)
+  // Total discount (promo + manual)
+  const discountAmount = promoDiscountTotal + manualDiscountAmount
+  
+  // Subtotal after all discounts
+  const subtotalAfterDiscount = Math.max(0, itemsSubtotalFull - discountAmount)
   
   // Delivery charge
   const deliveryCharge = (orderType === 'delivery' && selectedZone) ? selectedZone.delivery_fee : 0
@@ -146,7 +226,7 @@ export function POSPage() {
     item.product.is_taxable ? sum + (item.product.base_price * item.quantity) : sum, 0
   )
   // Proportional discount on taxable items
-  const discountRatio = itemsSubtotal > 0 ? discountAmount / itemsSubtotal : 0
+  const discountRatio = itemsSubtotalFull > 0 ? discountAmount / itemsSubtotalFull : 0
   const taxableAfterDiscount = taxableItemsAmount * (1 - discountRatio)
   const taxableAmount = taxableAfterDiscount + deliveryCharge // Delivery is taxable
   const tax = taxableAmount * taxRate
@@ -322,21 +402,41 @@ export function POSPage() {
         {/* Products Grid */}
         <div className="flex-1 overflow-auto p-4">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            {filteredProducts.map(product => (
-              <button
-                key={product.id}
-                onClick={() => addToCart(product)}
-                className="bg-white rounded-lg shadow hover:shadow-md transition p-3 text-left"
-              >
-                {product.image_url ? (
-                  <img src={product.image_url} alt={product.name} className="w-full h-24 object-cover rounded-lg mb-2" />
-                ) : (
-                  <div className="w-full h-24 bg-gray-100 rounded-lg mb-2 flex items-center justify-center text-3xl">🍔</div>
-                )}
-                <h3 className="font-medium text-gray-800 text-sm truncate">{product.name}</h3>
-                <p className="text-blue-600 font-bold">${product.base_price.toFixed(2)}</p>
-              </button>
-            ))}
+            {filteredProducts.map(product => {
+              const promoInfo = calculatePromoDiscount(product)
+              const hasPromo = promoInfo !== null
+              const discountedPrice = hasPromo 
+                ? product.base_price - promoInfo.discount 
+                : product.base_price
+              
+              return (
+                <button
+                  key={product.id}
+                  onClick={() => addToCart(product)}
+                  className={`rounded-lg shadow hover:shadow-md transition p-3 text-left relative ${hasPromo ? 'bg-green-50 border-2 border-green-300' : 'bg-white'}`}
+                >
+                  {hasPromo && (
+                    <div className="absolute -top-2 -right-2 bg-green-600 text-white text-xs px-2 py-0.5 rounded-full">
+                      🏷️ Sale
+                    </div>
+                  )}
+                  {product.image_url ? (
+                    <img src={product.image_url} alt={product.name} className="w-full h-24 object-cover rounded-lg mb-2" />
+                  ) : (
+                    <div className="w-full h-24 bg-gray-100 rounded-lg mb-2 flex items-center justify-center text-3xl">🍔</div>
+                  )}
+                  <h3 className="font-medium text-gray-800 text-sm truncate">{product.name}</h3>
+                  {hasPromo ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-400 line-through text-sm">${product.base_price.toFixed(2)}</span>
+                      <span className="text-green-600 font-bold">${discountedPrice.toFixed(2)}</span>
+                    </div>
+                  ) : (
+                    <p className="text-blue-600 font-bold">${product.base_price.toFixed(2)}</p>
+                  )}
+                </button>
+              )
+            })}
           </div>
           {filteredProducts.length === 0 && (
             <p className="text-center text-gray-500 py-8">No products found</p>
@@ -401,50 +501,83 @@ export function POSPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {cart.map(item => (
-                <div key={item.product.id} className="bg-gray-50 rounded-lg p-3">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex-1">
-                      <h4 className="font-medium text-gray-800">{item.product.name}</h4>
-                      <p className="text-sm text-gray-500">${item.product.base_price.toFixed(2)} each</p>
+              {cart.map(item => {
+                const hasPromo = item.promoDiscount && item.promoDiscount > 0
+                const originalTotal = item.product.base_price * item.quantity
+                const discountedTotal = hasPromo 
+                  ? originalTotal - (item.promoDiscount! * item.quantity)
+                  : originalTotal
+                
+                return (
+                  <div key={item.product.id} className={`rounded-lg p-3 ${hasPromo ? 'bg-green-50 border border-green-200' : 'bg-gray-50'}`}>
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-medium text-gray-800">{item.product.name}</h4>
+                          {hasPromo && (
+                            <span className="text-xs bg-green-600 text-white px-1.5 py-0.5 rounded">
+                              🏷️ {item.promoName}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {hasPromo ? (
+                            <>
+                              <span className="text-sm text-gray-400 line-through">${item.product.base_price.toFixed(2)}</span>
+                              <span className="text-sm text-green-600 font-medium">
+                                ${(item.product.base_price - item.promoDiscount!).toFixed(2)} each
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-sm text-gray-500">${item.product.base_price.toFixed(2)} each</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-right">
+                          {hasPromo && (
+                            <p className="text-xs text-gray-400 line-through">${originalTotal.toFixed(2)}</p>
+                          )}
+                          <p className={`font-bold ${hasPromo ? 'text-green-600' : 'text-gray-800'}`}>
+                            ${discountedTotal.toFixed(2)}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => setCart(prev => prev.filter(i => i.product.id !== item.product.id))}
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50 rounded p-1"
+                          title="Remove item"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <p className="font-bold text-gray-800">${(item.product.base_price * item.quantity).toFixed(2)}</p>
-                      <button
-                        onClick={() => setCart(prev => prev.filter(i => i.product.id !== item.product.id))}
-                        className="text-red-500 hover:text-red-700 hover:bg-red-50 rounded p-1"
-                        title="Remove item"
-                      >
-                        ✕
-                      </button>
+                      <div className="flex items-center bg-white rounded-lg border">
+                        <button 
+                          onClick={() => updateQuantity(item.product.id, -1)}
+                          className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded-l-lg"
+                        >
+                          −
+                        </button>
+                        <span className="px-3 py-1 font-medium">{item.quantity}</span>
+                        <button 
+                          onClick={() => updateQuantity(item.product.id, 1)}
+                          className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded-r-lg"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Notes..."
+                        value={item.notes}
+                        onChange={(e) => updateNotes(item.product.id, e.target.value)}
+                        className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1"
+                      />
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center bg-white rounded-lg border">
-                      <button 
-                        onClick={() => updateQuantity(item.product.id, -1)}
-                        className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded-l-lg"
-                      >
-                        −
-                      </button>
-                      <span className="px-3 py-1 font-medium">{item.quantity}</span>
-                      <button 
-                        onClick={() => updateQuantity(item.product.id, 1)}
-                        className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded-r-lg"
-                      >
-                        +
-                      </button>
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Notes..."
-                      value={item.notes}
-                      onChange={(e) => updateNotes(item.product.id, e.target.value)}
-                      className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1"
-                    />
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -526,12 +659,18 @@ export function POSPage() {
           <div className="space-y-2 mb-4">
             <div className="flex justify-between text-sm">
               <span className="text-gray-600">Items</span>
-              <span className="text-gray-800">${itemsSubtotal.toFixed(2)}</span>
+              <span className="text-gray-800">${itemsSubtotalFull.toFixed(2)}</span>
             </div>
-            {discountAmount > 0 && (
+            {promoDiscountTotal > 0 && (
               <div className="flex justify-between text-sm text-green-600">
-                <span>Discount ({discountType === 'percent' ? discountValue + '%' : '$' + discountValue})</span>
-                <span>-${discountAmount.toFixed(2)}</span>
+                <span>🏷️ Promo Discounts</span>
+                <span>-${promoDiscountTotal.toFixed(2)}</span>
+              </div>
+            )}
+            {manualDiscountAmount > 0 && (
+              <div className="flex justify-between text-sm text-orange-600">
+                <span>Manual Discount ({discountType === 'percent' ? discountValue + '%' : '$' + discountValue})</span>
+                <span>-${manualDiscountAmount.toFixed(2)}</span>
               </div>
             )}
             {deliveryCharge > 0 && (
