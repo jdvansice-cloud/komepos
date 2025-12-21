@@ -61,15 +61,38 @@ export function POSPage() {
       setProducts(productsRes.data || [])
       if (companyRes.data?.itbms_rate) setTaxRate(companyRes.data.itbms_rate)
       
-      // Fetch active item promos
+      // Fetch active item promos filtered by location
       const now = new Date().toISOString()
-      const { data: promos } = await supabase
+      
+      // First get promo IDs available at this location
+      let locationPromoIds: string[] | null = null
+      if (activeLocation?.id) {
+        const { data: promoLocs } = await supabase
+          .from('promo_locations')
+          .select('promo_id')
+          .eq('location_id', activeLocation.id)
+        locationPromoIds = promoLocs?.map(pl => pl.promo_id) || []
+      }
+      
+      // Fetch item promos
+      let promosQuery = supabase
         .from('promos')
         .select('id, name, discount_type, discount_value')
         .eq('is_active', true)
         .in('discount_type', ['item_percentage', 'item_fixed'])
         .lte('start_date', now)
         .or(`end_date.is.null,end_date.gte.${now}`)
+      
+      // Filter by location if applicable
+      if (activeLocation?.id && locationPromoIds !== null) {
+        if (locationPromoIds.length === 0) {
+          setItemPromos([])
+        } else {
+          promosQuery = promosQuery.in('id', locationPromoIds)
+        }
+      }
+      
+      const { data: promos } = await promosQuery
       
       if (promos && promos.length > 0) {
         // Get products for each promo

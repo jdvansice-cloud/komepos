@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
 
 type PromoDiscountType = 'item_percentage' | 'item_fixed' | 'order_percentage' | 'order_fixed' | 'free_delivery'
 
@@ -18,17 +19,40 @@ interface Promo {
 }
 
 export function ActivePromosPage() {
+  const { activeLocation } = useAuth()
   const [promos, setPromos] = useState<Promo[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     fetchActivePromos()
-  }, [])
+  }, [activeLocation])
 
   async function fetchActivePromos() {
+    setLoading(true)
     try {
       const now = new Date().toISOString()
-      const { data } = await supabase
+      
+      // First get promo IDs that are available at the active location
+      let promoIds: string[] = []
+      
+      if (activeLocation?.id) {
+        // Get promos for this specific location
+        const { data: promoLocs } = await supabase
+          .from('promo_locations')
+          .select('promo_id')
+          .eq('location_id', activeLocation.id)
+        
+        promoIds = promoLocs?.map(pl => pl.promo_id) || []
+        
+        if (promoIds.length === 0) {
+          setPromos([])
+          setLoading(false)
+          return
+        }
+      }
+      
+      // Fetch active promos
+      let query = supabase
         .from('promos')
         .select('*')
         .eq('is_active', true)
@@ -36,6 +60,12 @@ export function ActivePromosPage() {
         .or(`end_date.is.null,end_date.gte.${now}`)
         .order('created_at', { ascending: false })
       
+      // Filter by location if we have a specific location
+      if (activeLocation?.id && promoIds.length > 0) {
+        query = query.in('id', promoIds)
+      }
+      
+      const { data } = await query
       setPromos(data || [])
     } catch (error) {
       console.error('Error fetching promos:', error)
@@ -90,13 +120,19 @@ export function ActivePromosPage() {
     <div className="p-6">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-800">Active Promotions</h1>
-        <p className="text-gray-600">Current offers available for customers</p>
+        <p className="text-gray-600">
+          {activeLocation ? (
+            <>Promotions available at <span className="font-medium text-blue-600">{activeLocation.name}</span></>
+          ) : (
+            'All active promotions across locations'
+          )}
+        </p>
       </div>
 
       {promos.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-8 text-center">
           <div className="text-6xl mb-4">🎉</div>
-          <p className="text-gray-500 text-lg">No active promotions right now</p>
+          <p className="text-gray-500 text-lg">No active promotions {activeLocation ? `at ${activeLocation.name}` : ''}</p>
           <p className="text-gray-400 text-sm mt-2">Check back later or ask your manager about upcoming offers</p>
         </div>
       ) : (

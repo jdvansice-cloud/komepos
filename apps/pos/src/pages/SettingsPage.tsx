@@ -1058,15 +1058,18 @@ function ProductsSettings() {
 function PromosSettings() {
   const [promos, setPromos] = useState<Promo[]>([])
   const [allProducts, setAllProducts] = useState<Product[]>([])
+  const [allLocations, setAllLocations] = useState<LocationOption[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Promo | null>(null)
   const [formData, setFormData] = useState<{ name: string; description: string; discount_type: PromoDiscountType; discount_value: number; start_date: string; end_date: string; is_active: boolean }>({ name: '', description: '', discount_type: 'order_percentage', discount_value: 10, start_date: '', end_date: '', is_active: true })
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
+  const [selectedLocations, setSelectedLocations] = useState<string[]>([])
   const [productSearch, setProductSearch] = useState('')
   const [promoProductCounts, setPromoProductCounts] = useState<Record<string, number>>({})
+  const [promoLocationCounts, setPromoLocationCounts] = useState<Record<string, number>>({})
 
-  useEffect(() => { fetchPromos(); fetchProducts() }, [])
+  useEffect(() => { fetchPromos(); fetchProducts(); fetchLocations() }, [])
 
   async function fetchPromos() {
     try { 
@@ -1082,6 +1085,16 @@ function PromosSettings() {
         })
         setPromoProductCounts(counts)
       }
+      
+      // Get location counts for each promo
+      const { data: promoLocData } = await supabase.from('promo_locations').select('promo_id')
+      if (promoLocData) {
+        const counts: Record<string, number> = {}
+        promoLocData.forEach(pl => {
+          counts[pl.promo_id] = (counts[pl.promo_id] || 0) + 1
+        })
+        setPromoLocationCounts(counts)
+      }
     }
     catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
@@ -1092,6 +1105,11 @@ function PromosSettings() {
     setAllProducts(data || [])
   }
 
+  async function fetchLocations() {
+    const { data } = await supabase.from('locations').select('id, name').eq('is_active', true).order('name')
+    setAllLocations(data || [])
+  }
+
   async function openModal(promo?: Promo) {
     if (promo) { 
       setEditing(promo)
@@ -1100,10 +1118,15 @@ function PromosSettings() {
       // Load selected products for this promo
       const { data: promoProducts } = await supabase.from('promo_products').select('product_id').eq('promo_id', promo.id)
       setSelectedProducts(promoProducts?.map(pp => pp.product_id) || [])
+      
+      // Load selected locations for this promo
+      const { data: promoLocs } = await supabase.from('promo_locations').select('location_id').eq('promo_id', promo.id)
+      setSelectedLocations(promoLocs?.map(pl => pl.location_id) || [])
     } else { 
       setEditing(null)
       setFormData({ name: '', description: '', discount_type: 'order_percentage', discount_value: 10, start_date: new Date().toISOString().split('T')[0], end_date: '', is_active: true })
       setSelectedProducts([])
+      setSelectedLocations(allLocations.map(l => l.id)) // Default to all locations
     }
     setProductSearch('')
     setShowModal(true)
@@ -1116,6 +1139,12 @@ function PromosSettings() {
     const isItemDiscount = formData.discount_type === 'item_percentage' || formData.discount_type === 'item_fixed'
     if (isItemDiscount && selectedProducts.length === 0) {
       alert('Please select at least one product for item discounts')
+      return
+    }
+    
+    // Validate: need at least one location
+    if (selectedLocations.length === 0) {
+      alert('Please select at least one location')
       return
     }
     
@@ -1133,10 +1162,7 @@ function PromosSettings() {
       
       // Update promo_products for item discounts
       if (isItemDiscount) {
-        // Delete existing product associations
         await supabase.from('promo_products').delete().eq('promo_id', promoId)
-        
-        // Insert new product associations
         if (selectedProducts.length > 0) {
           const promoProducts = selectedProducts.map(productId => ({
             promo_id: promoId,
@@ -1145,8 +1171,17 @@ function PromosSettings() {
           await supabase.from('promo_products').insert(promoProducts)
         }
       } else {
-        // Clear product associations if not an item discount
         await supabase.from('promo_products').delete().eq('promo_id', promoId)
+      }
+      
+      // Update promo_locations
+      await supabase.from('promo_locations').delete().eq('promo_id', promoId)
+      if (selectedLocations.length > 0) {
+        const promoLocs = selectedLocations.map(locationId => ({
+          promo_id: promoId,
+          location_id: locationId
+        }))
+        await supabase.from('promo_locations').insert(promoLocs)
       }
       
       setShowModal(false)
@@ -1201,6 +1236,7 @@ function PromosSettings() {
             const status = getStatus(promo)
             const typeDisplay = getPromoTypeDisplay(promo.discount_type, promo.discount_value)
             const productCount = promoProductCounts[promo.id] || 0
+            const locationCount = promoLocationCounts[promo.id] || 0
             const isItemPromo = promo.discount_type === 'item_percentage' || promo.discount_type === 'item_fixed'
             return (
               <div key={promo.id} className="bg-white rounded-lg shadow p-4">
@@ -1221,6 +1257,9 @@ function PromosSettings() {
                           {productCount} product{productCount !== 1 ? 's' : ''}
                         </span>
                       )}
+                      <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded">
+                        📍 {locationCount === allLocations.length ? 'All locations' : `${locationCount} location${locationCount !== 1 ? 's' : ''}`}
+                      </span>
                       <span className="text-xs text-gray-400">{new Date(promo.start_date).toLocaleDateString()}{promo.end_date && ` - ${new Date(promo.end_date).toLocaleDateString()}`}</span>
                     </div>
                   </div>
@@ -1245,19 +1284,80 @@ function PromosSettings() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Promo Type *</label>
                 <div className="space-y-2">
-                  {/* Item Discounts */}
-                  <div className="border rounded-lg p-3">
+                  {/* Item Discounts with inline product selector */}
+                  <div className={`border rounded-lg p-3 ${isItemDiscount ? 'border-green-400 bg-green-50' : ''}`}>
                     <p className="text-sm font-medium text-gray-700 mb-2">🏷️ Item Discount (applies to specific products)</p>
-                    <div className="flex gap-2">
-                      <label className={`flex-1 flex items-center gap-2 p-2 border rounded cursor-pointer ${formData.discount_type === 'item_percentage' ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}>
+                    <div className="flex gap-2 mb-3">
+                      <label className={`flex-1 flex items-center gap-2 p-2 border rounded cursor-pointer ${formData.discount_type === 'item_percentage' ? 'border-green-500 bg-green-100' : 'border-gray-200 bg-white'}`}>
                         <input type="radio" name="discount_type" checked={formData.discount_type === 'item_percentage'} onChange={() => setFormData({ ...formData, discount_type: 'item_percentage' })} />
                         <span className="text-sm">% off items</span>
                       </label>
-                      <label className={`flex-1 flex items-center gap-2 p-2 border rounded cursor-pointer ${formData.discount_type === 'item_fixed' ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}>
+                      <label className={`flex-1 flex items-center gap-2 p-2 border rounded cursor-pointer ${formData.discount_type === 'item_fixed' ? 'border-green-500 bg-green-100' : 'border-gray-200 bg-white'}`}>
                         <input type="radio" name="discount_type" checked={formData.discount_type === 'item_fixed'} onChange={() => setFormData({ ...formData, discount_type: 'item_fixed' })} />
                         <span className="text-sm">$ off items</span>
                       </label>
                     </div>
+                    
+                    {/* Inline Product Selector */}
+                    {isItemDiscount && (
+                      <div className="border-t border-green-200 pt-3 mt-2">
+                        <label className="block text-sm font-medium text-green-800 mb-2">
+                          Select Products * ({selectedProducts.length} selected)
+                        </label>
+                        
+                        <input 
+                          type="text" 
+                          placeholder="Search products..." 
+                          value={productSearch}
+                          onChange={(e) => setProductSearch(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-2 text-sm"
+                        />
+                        
+                        {selectedProducts.length > 0 && (
+                          <div className="mb-2 flex flex-wrap gap-1">
+                            {selectedProducts.slice(0, 5).map(productId => {
+                              const product = allProducts.find(p => p.id === productId)
+                              return product ? (
+                                <span key={productId} className="inline-flex items-center gap-1 bg-green-600 text-white px-2 py-0.5 rounded text-xs">
+                                  {product.name}
+                                  <button type="button" onClick={() => setSelectedProducts(prev => prev.filter(id => id !== productId))} className="hover:text-green-200">×</button>
+                                </span>
+                              ) : null
+                            })}
+                            {selectedProducts.length > 5 && (
+                              <span className="text-xs text-green-700">+{selectedProducts.length - 5} more</span>
+                            )}
+                          </div>
+                        )}
+                        
+                        <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg bg-white">
+                          {filteredProducts.length === 0 ? (
+                            <p className="text-gray-500 text-center py-3 text-sm">No products found</p>
+                          ) : (
+                            filteredProducts.map(product => {
+                              const isSelected = selectedProducts.includes(product.id)
+                              return (
+                                <div 
+                                  key={product.id} 
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setSelectedProducts(prev => prev.filter(id => id !== product.id))
+                                    } else {
+                                      setSelectedProducts(prev => [...prev, product.id])
+                                    }
+                                  }}
+                                  className={`flex items-center gap-2 p-2 cursor-pointer border-b last:border-b-0 text-sm ${isSelected ? 'bg-green-100' : 'hover:bg-gray-50'}`}
+                                >
+                                  <input type="checkbox" checked={isSelected} readOnly className="rounded" />
+                                  <span className="flex-1 truncate">{product.name}</span>
+                                  <span className="text-xs text-gray-500">${product.base_price.toFixed(2)}</span>
+                                </div>
+                              )
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   
                   {/* Order Discounts */}
@@ -1294,88 +1394,68 @@ function PromosSettings() {
                 </div>
               )}
               
-              {/* Product Selector for Item Discounts */}
-              {isItemDiscount && (
-                <div className="border border-green-200 rounded-lg p-4 bg-green-50">
-                  <label className="block text-sm font-medium text-green-800 mb-2">
-                    🏷️ Select Products for Discount * ({selectedProducts.length} selected)
-                  </label>
-                  
-                  {/* Search */}
-                  <input 
-                    type="text" 
-                    placeholder="Search products..." 
-                    value={productSearch}
-                    onChange={(e) => setProductSearch(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2 mb-3"
-                  />
-                  
-                  {/* Selected Products */}
-                  {selectedProducts.length > 0 && (
-                    <div className="mb-3">
-                      <p className="text-xs text-green-700 mb-2">Selected:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedProducts.map(productId => {
-                          const product = allProducts.find(p => p.id === productId)
-                          return product ? (
-                            <span key={productId} className="inline-flex items-center gap-1 bg-green-600 text-white px-2 py-1 rounded text-sm">
-                              {product.name}
-                              <button type="button" onClick={() => setSelectedProducts(prev => prev.filter(id => id !== productId))} className="hover:text-green-200">×</button>
-                            </span>
-                          ) : null
-                        })}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Product List */}
-                  <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white">
-                    {filteredProducts.length === 0 ? (
-                      <p className="text-gray-500 text-center py-4 text-sm">No products found</p>
-                    ) : (
-                      filteredProducts.map(product => {
-                        const isSelected = selectedProducts.includes(product.id)
-                        return (
-                          <div 
-                            key={product.id} 
-                            onClick={() => {
-                              if (isSelected) {
-                                setSelectedProducts(prev => prev.filter(id => id !== product.id))
-                              } else {
-                                setSelectedProducts(prev => [...prev, product.id])
-                              }
-                            }}
-                            className={`flex items-center gap-3 p-2 cursor-pointer border-b last:border-b-0 ${isSelected ? 'bg-green-100' : 'hover:bg-gray-50'}`}
-                          >
-                            <input type="checkbox" checked={isSelected} readOnly className="rounded" />
-                            {product.image_url ? (
-                              <img src={product.image_url} alt="" className="w-8 h-8 rounded object-cover" />
-                            ) : (
-                              <div className="w-8 h-8 bg-gray-200 rounded flex items-center justify-center text-xs">🍽️</div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-gray-800 text-sm truncate">{product.name}</p>
-                              <p className="text-xs text-gray-500">{product.category?.name} • ${product.base_price.toFixed(2)}</p>
-                            </div>
-                            {isSelected && <span className="text-green-600">✓</span>}
-                          </div>
-                        )
-                      })
-                    )}
-                  </div>
-                </div>
-              )}
-              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Instructions for Operators</label>
-                <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={3} placeholder="Explain how operators should apply this promo. e.g., 'Apply to all burger items. Ask for code BURGER20.'" />
-                <p className="text-xs text-gray-500 mt-1">This will be shown to operators in the Active Promos section</p>
+                <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={2} placeholder="Explain how operators should apply this promo..." />
+                <p className="text-xs text-gray-500 mt-1">Shown to operators in Active Promos</p>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label><input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">End Date</label><input type="date" value={formData.end_date} onChange={(e) => setFormData({ ...formData, end_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
               </div>
+              
+              {/* Location Availability */}
+              <div className="border border-blue-200 rounded-lg p-4 bg-blue-50">
+                <label className="block text-sm font-medium text-blue-800 mb-2">
+                  📍 Location Availability * ({selectedLocations.length} of {allLocations.length} selected)
+                </label>
+                <p className="text-xs text-blue-600 mb-3">Select which locations this promo will be active at</p>
+                
+                <div className="flex gap-2 mb-3">
+                  <button 
+                    type="button" 
+                    onClick={() => setSelectedLocations(allLocations.map(l => l.id))}
+                    className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
+                  >
+                    Select All
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => setSelectedLocations([])}
+                    className="text-xs bg-gray-200 text-gray-700 px-3 py-1 rounded hover:bg-gray-300"
+                  >
+                    Clear All
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  {allLocations.map(location => {
+                    const isSelected = selectedLocations.includes(location.id)
+                    return (
+                      <label 
+                        key={location.id}
+                        className={`flex items-center gap-2 p-2 border rounded cursor-pointer ${isSelected ? 'border-blue-500 bg-blue-100' : 'border-gray-200 bg-white'}`}
+                      >
+                        <input 
+                          type="checkbox" 
+                          checked={isSelected}
+                          onChange={() => {
+                            if (isSelected) {
+                              setSelectedLocations(prev => prev.filter(id => id !== location.id))
+                            } else {
+                              setSelectedLocations(prev => [...prev, location.id])
+                            }
+                          }}
+                          className="rounded"
+                        />
+                        <span className="text-sm">{location.name}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+              
               <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" /><span className="text-sm">Active</span></label>
               <div className="flex justify-end gap-2 pt-4">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
