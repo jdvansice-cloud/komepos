@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 
 type TabType = 'company' | 'locations' | 'delivery' | 'users' | 'categories' | 'products' | 'promos'
 type UserRole = 'admin' | 'supervisor' | 'operator'
+type PromoDiscountType = 'item_percentage' | 'item_fixed' | 'order_percentage' | 'order_fixed' | 'free_delivery'
 
 interface Company { id: string; name: string; ruc: string; dv: string; itbms_rate: number; address: string; phone: string; email: string }
 interface Location { id: string; name: string; address: string; phone: string; is_active: boolean; opening_time: string; closing_time: string; delivery_enabled: boolean; latitude: number | null; longitude: number | null }
@@ -11,7 +12,7 @@ interface User { id: string; full_name: string; email: string; role: UserRole; i
 interface DeliveryZone { id: string; name: string; delivery_fee: number; is_active: boolean; locations: LocationOption[] }
 interface Category { id: string; name: string; description: string; image_url: string; sort_order: number; is_active: boolean }
 interface Product { id: string; name: string; description: string; base_price: number; image_url: string; is_taxable: boolean; is_active: boolean; has_options: boolean; category_id: string; category?: { name: string } }
-interface Promo { id: string; name: string; description: string; discount_type: 'percentage' | 'fixed' | 'free_delivery'; discount_value: number; start_date: string; end_date: string; is_active: boolean }
+interface Promo { id: string; name: string; description: string; discount_type: PromoDiscountType; discount_value: number; start_date: string; end_date: string; is_active: boolean }
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('company')
@@ -1059,7 +1060,7 @@ function PromosSettings() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Promo | null>(null)
-  const [formData, setFormData] = useState<{ name: string; description: string; discount_type: 'percentage' | 'fixed' | 'free_delivery'; discount_value: number; start_date: string; end_date: string; is_active: boolean }>({ name: '', description: '', discount_type: 'percentage', discount_value: 10, start_date: '', end_date: '', is_active: true })
+  const [formData, setFormData] = useState<{ name: string; description: string; discount_type: PromoDiscountType; discount_value: number; start_date: string; end_date: string; is_active: boolean }>({ name: '', description: '', discount_type: 'order_percentage', discount_value: 10, start_date: '', end_date: '', is_active: true })
 
   useEffect(() => { fetchPromos() }, [])
 
@@ -1071,7 +1072,7 @@ function PromosSettings() {
 
   function openModal(promo?: Promo) {
     if (promo) { setEditing(promo); setFormData({ name: promo.name, description: promo.description || '', discount_type: promo.discount_type, discount_value: promo.discount_value, start_date: promo.start_date?.split('T')[0] || '', end_date: promo.end_date?.split('T')[0] || '', is_active: promo.is_active }) }
-    else { setEditing(null); setFormData({ name: '', description: '', discount_type: 'percentage', discount_value: 10, start_date: new Date().toISOString().split('T')[0], end_date: '', is_active: true }) }
+    else { setEditing(null); setFormData({ name: '', description: '', discount_type: 'order_percentage', discount_value: 10, start_date: new Date().toISOString().split('T')[0], end_date: '', is_active: true }) }
     setShowModal(true)
   }
 
@@ -1094,6 +1095,17 @@ function PromosSettings() {
     return { label: 'Active', color: 'bg-green-100 text-green-700' }
   }
 
+  function getPromoTypeDisplay(type: PromoDiscountType, value: number) {
+    switch (type) {
+      case 'item_percentage': return { label: `${value}% off items`, color: 'bg-green-100 text-green-700', icon: '🏷️' }
+      case 'item_fixed': return { label: `$${value} off items`, color: 'bg-green-100 text-green-700', icon: '🏷️' }
+      case 'order_percentage': return { label: `${value}% off order`, color: 'bg-blue-100 text-blue-700', icon: '🛒' }
+      case 'order_fixed': return { label: `$${value} off order`, color: 'bg-blue-100 text-blue-700', icon: '🛒' }
+      case 'free_delivery': return { label: 'Free Delivery', color: 'bg-purple-100 text-purple-700', icon: '🚚' }
+      default: return { label: 'Unknown', color: 'bg-gray-100 text-gray-700', icon: '❓' }
+    }
+  }
+
   if (loading) return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
 
   return (
@@ -1109,6 +1121,7 @@ function PromosSettings() {
         <div className="grid gap-4">
           {promos.map(promo => {
             const status = getStatus(promo)
+            const typeDisplay = getPromoTypeDisplay(promo.discount_type, promo.discount_value)
             return (
               <div key={promo.id} className="bg-white rounded-lg shadow p-4">
                 <div className="flex justify-between items-start">
@@ -1118,11 +1131,10 @@ function PromosSettings() {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${status.color}`}>{status.label}</span>
                     </div>
                     <p className="text-sm text-gray-600 mt-1">{promo.description}</p>
-                    <div className="flex gap-3 mt-2">
-                      <span className="text-sm bg-purple-100 text-purple-700 px-2 py-0.5 rounded">
-                        {promo.discount_type === 'percentage' ? `${promo.discount_value}% off` : 
-                         promo.discount_type === 'fixed' ? `$${promo.discount_value} off` : 
-                         '🚚 Free Delivery'}
+                    <div className="flex gap-3 mt-2 items-center">
+                      <span className={`text-sm px-2 py-0.5 rounded flex items-center gap-1 ${typeDisplay.color}`}>
+                        <span>{typeDisplay.icon}</span>
+                        {typeDisplay.label}
                       </span>
                       <span className="text-xs text-gray-400">{new Date(promo.start_date).toLocaleDateString()}{promo.end_date && ` - ${new Date(promo.end_date).toLocaleDateString()}`}</span>
                     </div>
@@ -1140,21 +1152,69 @@ function PromosSettings() {
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
             <h2 className="text-xl font-bold mb-4">{editing ? 'Edit Promo' : 'Add Promo'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Promo Name *</label><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="e.g., Summer Special, Happy Hour" required /></div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Promo Type *</label>
+                <div className="space-y-2">
+                  {/* Item Discounts */}
+                  <div className="border rounded-lg p-3">
+                    <p className="text-sm font-medium text-gray-700 mb-2">🏷️ Item Discount (applies to specific products)</p>
+                    <div className="flex gap-2">
+                      <label className={`flex-1 flex items-center gap-2 p-2 border rounded cursor-pointer ${formData.discount_type === 'item_percentage' ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}>
+                        <input type="radio" name="discount_type" checked={formData.discount_type === 'item_percentage'} onChange={() => setFormData({ ...formData, discount_type: 'item_percentage' })} />
+                        <span className="text-sm">% off items</span>
+                      </label>
+                      <label className={`flex-1 flex items-center gap-2 p-2 border rounded cursor-pointer ${formData.discount_type === 'item_fixed' ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}>
+                        <input type="radio" name="discount_type" checked={formData.discount_type === 'item_fixed'} onChange={() => setFormData({ ...formData, discount_type: 'item_fixed' })} />
+                        <span className="text-sm">$ off items</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  {/* Order Discounts */}
+                  <div className="border rounded-lg p-3">
+                    <p className="text-sm font-medium text-gray-700 mb-2">🛒 Order Discount (applies to total order)</p>
+                    <div className="flex gap-2">
+                      <label className={`flex-1 flex items-center gap-2 p-2 border rounded cursor-pointer ${formData.discount_type === 'order_percentage' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+                        <input type="radio" name="discount_type" checked={formData.discount_type === 'order_percentage'} onChange={() => setFormData({ ...formData, discount_type: 'order_percentage' })} />
+                        <span className="text-sm">% off order</span>
+                      </label>
+                      <label className={`flex-1 flex items-center gap-2 p-2 border rounded cursor-pointer ${formData.discount_type === 'order_fixed' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+                        <input type="radio" name="discount_type" checked={formData.discount_type === 'order_fixed'} onChange={() => setFormData({ ...formData, discount_type: 'order_fixed' })} />
+                        <span className="text-sm">$ off order</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  {/* Free Delivery */}
+                  <div className="border rounded-lg p-3">
+                    <label className={`flex items-center gap-2 p-2 border rounded cursor-pointer ${formData.discount_type === 'free_delivery' ? 'border-purple-500 bg-purple-50' : 'border-gray-200'}`}>
+                      <input type="radio" name="discount_type" checked={formData.discount_type === 'free_delivery'} onChange={() => setFormData({ ...formData, discount_type: 'free_delivery' })} />
+                      <span className="text-sm">🚚 Free Delivery</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              
+              {formData.discount_type !== 'free_delivery' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Discount Value {formData.discount_type.includes('percentage') ? '(%)' : '($)'}
+                  </label>
+                  <input type="number" min="0" step={formData.discount_type.includes('percentage') ? '1' : '0.01'} value={formData.discount_value} onChange={(e) => setFormData({ ...formData, discount_value: parseFloat(e.target.value) || 0 })} className="w-full border border-gray-300 rounded-lg px-4 py-2" />
+                </div>
+              )}
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Instructions for Operators</label>
-                <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={3} placeholder="Explain how operators should apply this promo. e.g., 'Ask customer for the code. Apply 10% discount manually on combos only. Valid for dine-in orders.'" />
+                <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={3} placeholder="Explain how operators should apply this promo. e.g., 'Apply to all burger items. Ask for code BURGER20.'" />
                 <p className="text-xs text-gray-500 mt-1">This will be shown to operators in the Active Promos section</p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Type</label><select value={formData.discount_type} onChange={(e) => setFormData({ ...formData, discount_type: e.target.value as 'percentage' | 'fixed' | 'free_delivery' })} className="w-full border border-gray-300 rounded-lg px-4 py-2"><option value="percentage">Percentage</option><option value="fixed">Fixed Amount</option><option value="free_delivery">Free Delivery</option></select></div>
-                {formData.discount_type !== 'free_delivery' && (
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Value</label><input type="number" min="0" value={formData.discount_value} onChange={(e) => setFormData({ ...formData, discount_value: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
-                )}
-              </div>
+              
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label><input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">End Date</label><input type="date" value={formData.end_date} onChange={(e) => setFormData({ ...formData, end_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>

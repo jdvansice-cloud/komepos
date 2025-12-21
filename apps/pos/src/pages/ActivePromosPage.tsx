@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
+type PromoDiscountType = 'item_percentage' | 'item_fixed' | 'order_percentage' | 'order_fixed' | 'free_delivery'
+
 interface Promo {
   id: string
   name: string
   description: string
-  discount_type: 'percentage' | 'fixed' | 'free_delivery'
+  discount_type: PromoDiscountType
   discount_value: number
   start_date: string
   end_date: string
@@ -44,15 +46,26 @@ export function ActivePromosPage() {
 
   function getDiscountDisplay(promo: Promo) {
     switch (promo.discount_type) {
-      case 'percentage':
-        return { text: `${promo.discount_value}% OFF`, color: 'bg-green-500' }
-      case 'fixed':
-        return { text: `$${promo.discount_value} OFF`, color: 'bg-blue-500' }
+      case 'item_percentage':
+        return { text: `${promo.discount_value}% OFF`, subtext: 'on selected items', color: 'bg-green-500', icon: '🏷️' }
+      case 'item_fixed':
+        return { text: `$${promo.discount_value} OFF`, subtext: 'on selected items', color: 'bg-green-500', icon: '🏷️' }
+      case 'order_percentage':
+        return { text: `${promo.discount_value}% OFF`, subtext: 'total order', color: 'bg-blue-500', icon: '🛒' }
+      case 'order_fixed':
+        return { text: `$${promo.discount_value} OFF`, subtext: 'total order', color: 'bg-blue-500', icon: '🛒' }
       case 'free_delivery':
-        return { text: 'FREE DELIVERY', color: 'bg-purple-500' }
+        return { text: 'FREE DELIVERY', subtext: 'no delivery fee', color: 'bg-purple-500', icon: '🚚' }
       default:
-        return { text: 'SPECIAL', color: 'bg-gray-500' }
+        return { text: 'SPECIAL', subtext: '', color: 'bg-gray-500', icon: '🎉' }
     }
+  }
+
+  function getPromoCategory(type: PromoDiscountType) {
+    if (type === 'item_percentage' || type === 'item_fixed') return 'Item Discount'
+    if (type === 'order_percentage' || type === 'order_fixed') return 'Order Discount'
+    if (type === 'free_delivery') return 'Delivery'
+    return 'Other'
   }
 
   function getDaysRemaining(endDate: string | null) {
@@ -91,12 +104,18 @@ export function ActivePromosPage() {
           {promos.map(promo => {
             const discount = getDiscountDisplay(promo)
             const daysRemaining = getDaysRemaining(promo.end_date)
+            const category = getPromoCategory(promo.discount_type)
             
             return (
               <div key={promo.id} className="bg-white rounded-lg shadow-lg overflow-hidden">
                 {/* Header with discount badge */}
                 <div className={`${discount.color} text-white p-4`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-2xl">{discount.icon}</span>
+                    <span className="text-xs bg-white/20 px-2 py-0.5 rounded">{category}</span>
+                  </div>
                   <div className="text-2xl font-bold">{discount.text}</div>
+                  {discount.subtext && <div className="text-sm opacity-90">{discount.subtext}</div>}
                   {promo.code && (
                     <div className="mt-2 bg-white/20 rounded px-2 py-1 inline-block">
                       <span className="text-sm">Code: </span>
