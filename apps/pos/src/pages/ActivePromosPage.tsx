@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { getTodayInTimezone, getPromoStatus } from '../lib/timezone'
 
 type PromoDiscountType = 'item_percentage' | 'item_fixed' | 'order_percentage' | 'order_fixed' | 'free_delivery'
 
@@ -22,6 +23,7 @@ export function ActivePromosPage() {
   const { activeLocation } = useAuth()
   const [promos, setPromos] = useState<Promo[]>([])
   const [loading, setLoading] = useState(true)
+  const [todayStr, setTodayStr] = useState('')
 
   useEffect(() => {
     fetchActivePromos()
@@ -30,15 +32,17 @@ export function ActivePromosPage() {
   async function fetchActivePromos() {
     setLoading(true)
     try {
-      const now = new Date().toISOString()
+      // Get today's date in company timezone
+      const today = await getTodayInTimezone()
+      setTodayStr(today)
       
       // Fetch all active promos first
       const { data: allPromos, error: promosError } = await supabase
         .from('promos')
         .select('*')
         .eq('is_active', true)
-        .lte('start_date', now)
-        .or(`end_date.is.null,end_date.gte.${now}`)
+        .lte('start_date', today + 'T23:59:59')
+        .or(`end_date.is.null,end_date.gte.${today}`)
         .order('created_at', { ascending: false })
       
       if (promosError) {
@@ -61,43 +65,32 @@ export function ActivePromosPage() {
         return
       }
       
-      // Try to get location-filtered promos
-      const { data: promoLocs, error: locsError } = await supabase
+      // Get all promo_locations entries
+      const { data: allPromoLocs, error: locsError } = await supabase
         .from('promo_locations')
-        .select('promo_id')
-        .eq('location_id', activeLocation.id)
+        .select('promo_id, location_id')
       
-      // If promo_locations table doesn't exist or query fails, show all promos
+      // If table doesn't exist or error, show all promos
       if (locsError) {
-        console.log('promo_locations query failed (table may not exist), showing all promos:', locsError)
+        console.log('promo_locations query failed:', locsError)
         setPromos(allPromos)
         setLoading(false)
         return
       }
       
-      // If no location associations exist at all, show all promos (backward compatibility)
-      const { count } = await supabase
-        .from('promo_locations')
-        .select('*', { count: 'exact', head: true })
+      // Filter promos: show if NO location restrictions OR current location is in the list
+      const filteredPromos = allPromos.filter(promo => {
+        const promoLocationEntries = allPromoLocs?.filter(pl => pl.promo_id === promo.id) || []
+        
+        // If promo has no location restrictions, show it everywhere
+        if (promoLocationEntries.length === 0) {
+          return true
+        }
+        
+        // If promo has location restrictions, check if current location is included
+        return promoLocationEntries.some(pl => pl.location_id === activeLocation.id)
+      })
       
-      if (count === 0) {
-        // No location restrictions set up yet, show all promos
-        setPromos(allPromos)
-        setLoading(false)
-        return
-      }
-      
-      // Filter promos by location
-      const locationPromoIds = promoLocs?.map(pl => pl.promo_id) || []
-      
-      if (locationPromoIds.length === 0) {
-        // This location has no promos assigned
-        setPromos([])
-        setLoading(false)
-        return
-      }
-      
-      const filteredPromos = allPromos.filter(p => locationPromoIds.includes(p.id))
       setPromos(filteredPromos)
       
     } catch (error) {
@@ -132,10 +125,11 @@ export function ActivePromosPage() {
   }
 
   function getDaysRemaining(endDate: string | null) {
-    if (!endDate) return null
-    const end = new Date(endDate)
-    const now = new Date()
-    const diff = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+    if (!endDate || !todayStr) return null
+    const endDateOnly = endDate.split('T')[0]
+    const todayDate = new Date(todayStr + 'T00:00:00')
+    const endDateObj = new Date(endDateOnly + 'T00:00:00')
+    const diff = Math.ceil((endDateObj.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24))
     return diff
   }
 

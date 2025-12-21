@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { getCompanyTimezone } from '../lib/timezone'
 
 interface Order {
   id: string
@@ -17,10 +18,30 @@ export function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
+  const [timezone, setTimezone] = useState('America/Panama')
 
   useEffect(() => {
+    async function init() {
+      const tz = await getCompanyTimezone()
+      setTimezone(tz)
+    }
+    init()
     fetchOrders()
   }, [])
+
+  function formatDateTime(date: string) {
+    try {
+      return new Date(date).toLocaleString('en-US', { 
+        timeZone: timezone,
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch {
+      return new Date(date).toLocaleString()
+    }
+  }
 
   async function fetchOrders() {
     try {
@@ -110,7 +131,7 @@ export function OrdersPage() {
                   {order.customer && (
                     <p className="text-gray-600 mt-1">{order.customer.full_name} • {order.customer.phone}</p>
                   )}
-                  <p className="text-sm text-gray-400 mt-1">{new Date(order.created_at).toLocaleString()}</p>
+                  <p className="text-sm text-gray-400 mt-1">{formatDateTime(order.created_at)}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-2xl font-bold text-gray-800">${order.total?.toFixed(2)}</p>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { getCompanyTimezone } from '../lib/timezone'
 
 interface Shift {
   id: string
@@ -54,6 +55,15 @@ export function ShiftsPage() {
   const [cashAction, setCashAction] = useState<'cash_in' | 'cash_out'>('cash_in')
   const [cashAmount, setCashAmount] = useState('')
   const [cashReason, setCashReason] = useState('')
+  const [timezone, setTimezone] = useState('America/Panama')
+
+  useEffect(() => {
+    async function init() {
+      const tz = await getCompanyTimezone()
+      setTimezone(tz)
+    }
+    init()
+  }, [])
 
   useEffect(() => {
     fetchShiftData()
@@ -220,11 +230,37 @@ export function ShiftsPage() {
   }
 
   function formatTime(date: string) {
-    return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    try {
+      return new Date(date).toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        timeZone: timezone
+      })
+    } catch {
+      return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
   }
 
   function formatDate(date: string) {
-    return new Date(date).toLocaleDateString()
+    try {
+      return new Date(date).toLocaleDateString('en-US', { timeZone: timezone })
+    } catch {
+      return new Date(date).toLocaleDateString()
+    }
+  }
+
+  function formatDateTime(date: string) {
+    try {
+      return new Date(date).toLocaleString('en-US', { 
+        timeZone: timezone,
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch {
+      return new Date(date).toLocaleString()
+    }
   }
 
   if (loading) {

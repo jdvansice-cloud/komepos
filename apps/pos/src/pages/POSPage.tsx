@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { getTodayInTimezone } from '../lib/timezone'
 
 interface Category { id: string; name: string; sort_order: number }
 interface Product { id: string; name: string; description: string; base_price: number; image_url: string; category_id: string; is_taxable: boolean }
@@ -61,8 +62,8 @@ export function POSPage() {
       setProducts(productsRes.data || [])
       if (companyRes.data?.itbms_rate) setTaxRate(companyRes.data.itbms_rate)
       
-      // Fetch active item promos
-      const now = new Date().toISOString()
+      // Fetch active item promos using company timezone
+      const todayStr = await getTodayInTimezone()
       
       // Get all item promos first
       const { data: allItemPromos } = await supabase
@@ -70,33 +71,27 @@ export function POSPage() {
         .select('id, name, discount_type, discount_value')
         .eq('is_active', true)
         .in('discount_type', ['item_percentage', 'item_fixed'])
-        .lte('start_date', now)
-        .or(`end_date.is.null,end_date.gte.${now}`)
+        .lte('start_date', todayStr + 'T23:59:59')
+        .or(`end_date.is.null,end_date.gte.${todayStr}`)
       
       let promos = allItemPromos || []
       
-      // Try to filter by location if applicable
+      // Filter by location if applicable
       if (activeLocation?.id && promos.length > 0) {
-        const { data: promoLocs, error: locsError } = await supabase
+        const { data: allPromoLocs, error: locsError } = await supabase
           .from('promo_locations')
-          .select('promo_id')
-          .eq('location_id', activeLocation.id)
+          .select('promo_id, location_id')
         
-        // Only filter if promo_locations table exists and has data
-        if (!locsError && promoLocs) {
-          // Check if any location restrictions exist
-          const { count } = await supabase
-            .from('promo_locations')
-            .select('*', { count: 'exact', head: true })
-          
-          if (count && count > 0) {
-            // Location restrictions are set up, filter promos
-            const locationPromoIds = promoLocs.map(pl => pl.promo_id)
-            promos = promos.filter(p => locationPromoIds.includes(p.id))
-          }
-          // else: no restrictions set up, use all promos
+        if (!locsError && allPromoLocs) {
+          // Filter promos: show if NO location restrictions OR current location is included
+          promos = promos.filter(promo => {
+            const promoLocationEntries = allPromoLocs.filter(pl => pl.promo_id === promo.id)
+            // If promo has no location restrictions, show it everywhere
+            if (promoLocationEntries.length === 0) return true
+            // If promo has location restrictions, check if current location is included
+            return promoLocationEntries.some(pl => pl.location_id === activeLocation.id)
+          })
         }
-        // else: table doesn't exist or error, use all promos
       }
       
       if (promos.length > 0) {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { getCompanyTimezone, getDateInTimezone } from '../lib/timezone'
 
 type ReportTab = 'overview' | 'shifts' | 'discounts' | 'refunds'
 
@@ -36,24 +37,35 @@ export function ReportsPage() {
   const [stats, setStats] = useState({ totalOrders: 0, totalRevenue: 0, avgOrderValue: 0, totalCustomers: 0, totalDiscounts: 0, totalRefunds: 0 })
   const [userStats, setUserStats] = useState<UserStats[]>([])
   const [shiftReports, setShiftReports] = useState<ShiftReport[]>([])
+  const [timezone, setTimezone] = useState('America/Panama')
+
+  useEffect(() => {
+    async function init() {
+      const tz = await getCompanyTimezone()
+      setTimezone(tz)
+    }
+    init()
+  }, [])
 
   useEffect(() => { 
     fetchReports() 
   }, [dateRange, activeLocation])
 
   function getDateFilter() {
-    const now = new Date()
+    // Get current date in company timezone
+    const todayStr = getDateInTimezone(new Date(), timezone)
+    
     switch (dateRange) {
       case 'today':
-        return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+        return todayStr + 'T00:00:00'
       case 'week':
-        const weekAgo = new Date(now)
+        const weekAgo = new Date()
         weekAgo.setDate(weekAgo.getDate() - 7)
-        return weekAgo.toISOString()
+        return getDateInTimezone(weekAgo, timezone) + 'T00:00:00'
       case 'month':
-        const monthAgo = new Date(now)
+        const monthAgo = new Date()
         monthAgo.setMonth(monthAgo.getMonth() - 1)
-        return monthAgo.toISOString()
+        return getDateInTimezone(monthAgo, timezone) + 'T00:00:00'
       default:
         return null
     }
@@ -183,11 +195,37 @@ export function ReportsPage() {
   }
 
   function formatDate(date: string) {
-    return new Date(date).toLocaleDateString()
+    try {
+      return new Date(date).toLocaleDateString('en-US', { timeZone: timezone })
+    } catch {
+      return new Date(date).toLocaleDateString()
+    }
   }
 
   function formatTime(date: string) {
-    return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    try {
+      return new Date(date).toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        timeZone: timezone
+      })
+    } catch {
+      return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+  }
+
+  function formatDateTime(date: string) {
+    try {
+      return new Date(date).toLocaleString('en-US', { 
+        timeZone: timezone,
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch {
+      return new Date(date).toLocaleString()
+    }
   }
 
   const tabs = [

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { getTodayInTimezone, clearTimezoneCache } from '../lib/timezone'
 
 type TabType = 'company' | 'locations' | 'delivery' | 'users' | 'categories' | 'products' | 'promos'
 type UserRole = 'admin' | 'supervisor' | 'operator'
 type PromoDiscountType = 'item_percentage' | 'item_fixed' | 'order_percentage' | 'order_fixed' | 'free_delivery'
 
-interface Company { id: string; name: string; ruc: string; dv: string; itbms_rate: number; address: string; phone: string; email: string }
+interface Company { id: string; name: string; ruc: string; dv: string; itbms_rate: number; address: string; phone: string; email: string; timezone: string }
 interface Location { id: string; name: string; address: string; phone: string; is_active: boolean; opening_time: string; closing_time: string; delivery_enabled: boolean; latitude: number | null; longitude: number | null }
 interface LocationOption { id: string; name: string }
 interface User { id: string; full_name: string; email: string; role: UserRole; is_active: boolean }
@@ -13,6 +14,26 @@ interface DeliveryZone { id: string; name: string; delivery_fee: number; is_acti
 interface Category { id: string; name: string; description: string; image_url: string; sort_order: number; is_active: boolean }
 interface Product { id: string; name: string; description: string; base_price: number; image_url: string; is_taxable: boolean; is_active: boolean; has_options: boolean; category_id: string; category?: { name: string } }
 interface Promo { id: string; name: string; description: string; discount_type: PromoDiscountType; discount_value: number; start_date: string; end_date: string; is_active: boolean }
+
+// Common timezones for the Americas
+const TIMEZONES = [
+  { value: 'America/Panama', label: 'Panama (EST/UTC-5)' },
+  { value: 'America/New_York', label: 'New York (EST/EDT)' },
+  { value: 'America/Chicago', label: 'Chicago (CST/CDT)' },
+  { value: 'America/Denver', label: 'Denver (MST/MDT)' },
+  { value: 'America/Los_Angeles', label: 'Los Angeles (PST/PDT)' },
+  { value: 'America/Mexico_City', label: 'Mexico City (CST/CDT)' },
+  { value: 'America/Bogota', label: 'Bogota (COT/UTC-5)' },
+  { value: 'America/Lima', label: 'Lima (PET/UTC-5)' },
+  { value: 'America/Santiago', label: 'Santiago (CLT/CLST)' },
+  { value: 'America/Sao_Paulo', label: 'São Paulo (BRT/BRST)' },
+  { value: 'America/Buenos_Aires', label: 'Buenos Aires (ART/UTC-3)' },
+  { value: 'America/Caracas', label: 'Caracas (VET/UTC-4)' },
+  { value: 'America/Costa_Rica', label: 'Costa Rica (CST/UTC-6)' },
+  { value: 'America/Guatemala', label: 'Guatemala (CST/UTC-6)' },
+  { value: 'America/Santo_Domingo', label: 'Santo Domingo (AST/UTC-4)' },
+  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
+]
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('company')
@@ -71,14 +92,14 @@ function CompanySettings() {
   const [company, setCompany] = useState<Company | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [formData, setFormData] = useState({ name: '', ruc: '', dv: '', itbms_rate: 0.07, address: '', phone: '', email: '' })
+  const [formData, setFormData] = useState({ name: '', ruc: '', dv: '', itbms_rate: 0.07, address: '', phone: '', email: '', timezone: 'America/Panama' })
 
   useEffect(() => { fetchCompany() }, [])
 
   async function fetchCompany() {
     try {
       const { data } = await supabase.from('companies').select('*').single()
-      if (data) { setCompany(data); setFormData({ name: data.name || '', ruc: data.ruc || '', dv: data.dv || '', itbms_rate: data.itbms_rate || 0.07, address: data.address || '', phone: data.phone || '', email: data.email || '' }) }
+      if (data) { setCompany(data); setFormData({ name: data.name || '', ruc: data.ruc || '', dv: data.dv || '', itbms_rate: data.itbms_rate || 0.07, address: data.address || '', phone: data.phone || '', email: data.email || '', timezone: data.timezone || 'America/Panama' }) }
     } catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
   }
@@ -88,9 +109,28 @@ function CompanySettings() {
     setSaving(true)
     try {
       await supabase.from('companies').update(formData).eq('id', company?.id)
+      clearTimezoneCache() // Clear cache so new timezone takes effect
       alert('Settings saved!')
     } catch (error) { console.error('Error:', error) }
     finally { setSaving(false) }
+  }
+  
+  // Get current time in selected timezone for preview
+  function getCurrentTimeInTimezone() {
+    try {
+      return new Date().toLocaleString('en-US', { 
+        timeZone: formData.timezone,
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      })
+    } catch {
+      return 'Invalid timezone'
+    }
   }
 
   if (loading) return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
@@ -113,10 +153,25 @@ function CompanySettings() {
             <input type="text" value={formData.dv} onChange={(e) => setFormData({ ...formData, dv: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required />
           </div>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">ITBMS Rate (%)</label>
-          <input type="number" step="0.01" min="0" max="1" value={formData.itbms_rate} onChange={(e) => setFormData({ ...formData, itbms_rate: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" />
-          <p className="text-xs text-gray-500 mt-1">Enter as decimal (e.g., 0.07 for 7%)</p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ITBMS Rate (%)</label>
+            <input type="number" step="0.01" min="0" max="1" value={formData.itbms_rate} onChange={(e) => setFormData({ ...formData, itbms_rate: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" />
+            <p className="text-xs text-gray-500 mt-1">Enter as decimal (e.g., 0.07 for 7%)</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">🌐 Timezone *</label>
+            <select 
+              value={formData.timezone} 
+              onChange={(e) => setFormData({ ...formData, timezone: e.target.value })} 
+              className="w-full border border-gray-300 rounded-lg px-4 py-2"
+            >
+              {TIMEZONES.map(tz => (
+                <option key={tz.value} value={tz.value}>{tz.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-green-600 mt-1">Current: {getCurrentTimeInTimezone()}</p>
+          </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
@@ -1068,8 +1123,18 @@ function PromosSettings() {
   const [productSearch, setProductSearch] = useState('')
   const [promoProductCounts, setPromoProductCounts] = useState<Record<string, number>>({})
   const [promoLocationCounts, setPromoLocationCounts] = useState<Record<string, number>>({})
+  const [todayStr, setTodayStr] = useState('')
 
-  useEffect(() => { fetchPromos(); fetchProducts(); fetchLocations() }, [])
+  useEffect(() => { 
+    async function init() {
+      const today = await getTodayInTimezone()
+      setTodayStr(today)
+      fetchPromos()
+      fetchProducts()
+      fetchLocations()
+    }
+    init()
+  }, [])
 
   async function fetchPromos() {
     try { 
@@ -1202,10 +1267,14 @@ function PromosSettings() {
   async function toggleActive(promo: Promo) { await supabase.from('promos').update({ is_active: !promo.is_active }).eq('id', promo.id); fetchPromos() }
 
   function getStatus(promo: Promo) {
-    const now = new Date(), start = new Date(promo.start_date), end = promo.end_date ? new Date(promo.end_date) : null
+    if (!todayStr) return { label: 'Loading...', color: 'bg-gray-100 text-gray-700' }
+    
+    const startDateOnly = promo.start_date.split('T')[0]
+    const endDateOnly = promo.end_date?.split('T')[0]
+    
     if (!promo.is_active) return { label: 'Inactive', color: 'bg-gray-100 text-gray-700' }
-    if (now < start) return { label: 'Scheduled', color: 'bg-blue-100 text-blue-700' }
-    if (end && now > end) return { label: 'Expired', color: 'bg-red-100 text-red-700' }
+    if (todayStr < startDateOnly) return { label: 'Scheduled', color: 'bg-blue-100 text-blue-700' }
+    if (endDateOnly && todayStr > endDateOnly) return { label: 'Expired', color: 'bg-red-100 text-red-700' }
     return { label: 'Active', color: 'bg-green-100 text-green-700' }
   }
 
