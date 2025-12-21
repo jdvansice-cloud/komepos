@@ -1073,7 +1073,10 @@ function PromosSettings() {
 
   async function fetchPromos() {
     try { 
-      const { data } = await supabase.from('promos').select('*').order('created_at', { ascending: false })
+      const { data, error } = await supabase.from('promos').select('*').order('created_at', { ascending: false })
+      if (error) {
+        console.error('Error fetching promos:', error)
+      }
       setPromos(data || [])
       
       // Get product counts for each promo
@@ -1086,14 +1089,18 @@ function PromosSettings() {
         setPromoProductCounts(counts)
       }
       
-      // Get location counts for each promo
-      const { data: promoLocData } = await supabase.from('promo_locations').select('promo_id')
-      if (promoLocData) {
-        const counts: Record<string, number> = {}
-        promoLocData.forEach(pl => {
-          counts[pl.promo_id] = (counts[pl.promo_id] || 0) + 1
-        })
-        setPromoLocationCounts(counts)
+      // Get location counts for each promo (handle if table doesn't exist)
+      try {
+        const { data: promoLocData } = await supabase.from('promo_locations').select('promo_id')
+        if (promoLocData) {
+          const counts: Record<string, number> = {}
+          promoLocData.forEach(pl => {
+            counts[pl.promo_id] = (counts[pl.promo_id] || 0) + 1
+          })
+          setPromoLocationCounts(counts)
+        }
+      } catch (locError) {
+        console.log('promo_locations table may not exist yet:', locError)
       }
     }
     catch (error) { console.error('Error:', error) }
@@ -1142,21 +1149,17 @@ function PromosSettings() {
       return
     }
     
-    // Validate: need at least one location
-    if (selectedLocations.length === 0) {
-      alert('Please select at least one location')
-      return
-    }
-    
     try {
       let promoId: string
       
       if (editing) { 
-        await supabase.from('promos').update(formData).eq('id', editing.id)
+        const { error } = await supabase.from('promos').update(formData).eq('id', editing.id)
+        if (error) throw error
         promoId = editing.id
       } else { 
         const { data: company } = await supabase.from('companies').select('id').single()
-        const { data: newPromo } = await supabase.from('promos').insert({ ...formData, company_id: company?.id }).select().single()
+        const { data: newPromo, error } = await supabase.from('promos').insert({ ...formData, company_id: company?.id }).select().single()
+        if (error) throw error
         promoId = newPromo.id
       }
       
@@ -1174,14 +1177,18 @@ function PromosSettings() {
         await supabase.from('promo_products').delete().eq('promo_id', promoId)
       }
       
-      // Update promo_locations
-      await supabase.from('promo_locations').delete().eq('promo_id', promoId)
-      if (selectedLocations.length > 0) {
-        const promoLocs = selectedLocations.map(locationId => ({
-          promo_id: promoId,
-          location_id: locationId
-        }))
-        await supabase.from('promo_locations').insert(promoLocs)
+      // Update promo_locations (optional - table may not exist)
+      try {
+        await supabase.from('promo_locations').delete().eq('promo_id', promoId)
+        if (selectedLocations.length > 0) {
+          const promoLocs = selectedLocations.map(locationId => ({
+            promo_id: promoId,
+            location_id: locationId
+          }))
+          await supabase.from('promo_locations').insert(promoLocs)
+        }
+      } catch (locError) {
+        console.log('Could not save location restrictions (table may not exist):', locError)
       }
       
       setShowModal(false)

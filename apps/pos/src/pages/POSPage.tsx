@@ -61,21 +61,11 @@ export function POSPage() {
       setProducts(productsRes.data || [])
       if (companyRes.data?.itbms_rate) setTaxRate(companyRes.data.itbms_rate)
       
-      // Fetch active item promos filtered by location
+      // Fetch active item promos
       const now = new Date().toISOString()
       
-      // First get promo IDs available at this location
-      let locationPromoIds: string[] | null = null
-      if (activeLocation?.id) {
-        const { data: promoLocs } = await supabase
-          .from('promo_locations')
-          .select('promo_id')
-          .eq('location_id', activeLocation.id)
-        locationPromoIds = promoLocs?.map(pl => pl.promo_id) || []
-      }
-      
-      // Fetch item promos
-      let promosQuery = supabase
+      // Get all item promos first
+      const { data: allItemPromos } = await supabase
         .from('promos')
         .select('id, name, discount_type, discount_value')
         .eq('is_active', true)
@@ -83,18 +73,33 @@ export function POSPage() {
         .lte('start_date', now)
         .or(`end_date.is.null,end_date.gte.${now}`)
       
-      // Filter by location if applicable
-      if (activeLocation?.id && locationPromoIds !== null) {
-        if (locationPromoIds.length === 0) {
-          setItemPromos([])
-        } else {
-          promosQuery = promosQuery.in('id', locationPromoIds)
+      let promos = allItemPromos || []
+      
+      // Try to filter by location if applicable
+      if (activeLocation?.id && promos.length > 0) {
+        const { data: promoLocs, error: locsError } = await supabase
+          .from('promo_locations')
+          .select('promo_id')
+          .eq('location_id', activeLocation.id)
+        
+        // Only filter if promo_locations table exists and has data
+        if (!locsError && promoLocs) {
+          // Check if any location restrictions exist
+          const { count } = await supabase
+            .from('promo_locations')
+            .select('*', { count: 'exact', head: true })
+          
+          if (count && count > 0) {
+            // Location restrictions are set up, filter promos
+            const locationPromoIds = promoLocs.map(pl => pl.promo_id)
+            promos = promos.filter(p => locationPromoIds.includes(p.id))
+          }
+          // else: no restrictions set up, use all promos
         }
+        // else: table doesn't exist or error, use all promos
       }
       
-      const { data: promos } = await promosQuery
-      
-      if (promos && promos.length > 0) {
+      if (promos.length > 0) {
         // Get products for each promo
         const promoIds = promos.map(p => p.id)
         const { data: promoProducts } = await supabase

@@ -32,27 +32,8 @@ export function ActivePromosPage() {
     try {
       const now = new Date().toISOString()
       
-      // First get promo IDs that are available at the active location
-      let promoIds: string[] = []
-      
-      if (activeLocation?.id) {
-        // Get promos for this specific location
-        const { data: promoLocs } = await supabase
-          .from('promo_locations')
-          .select('promo_id')
-          .eq('location_id', activeLocation.id)
-        
-        promoIds = promoLocs?.map(pl => pl.promo_id) || []
-        
-        if (promoIds.length === 0) {
-          setPromos([])
-          setLoading(false)
-          return
-        }
-      }
-      
-      // Fetch active promos
-      let query = supabase
+      // Fetch all active promos first
+      const { data: allPromos, error: promosError } = await supabase
         .from('promos')
         .select('*')
         .eq('is_active', true)
@@ -60,13 +41,65 @@ export function ActivePromosPage() {
         .or(`end_date.is.null,end_date.gte.${now}`)
         .order('created_at', { ascending: false })
       
-      // Filter by location if we have a specific location
-      if (activeLocation?.id && promoIds.length > 0) {
-        query = query.in('id', promoIds)
+      if (promosError) {
+        console.error('Error fetching promos:', promosError)
+        setPromos([])
+        setLoading(false)
+        return
       }
       
-      const { data } = await query
-      setPromos(data || [])
+      if (!allPromos || allPromos.length === 0) {
+        setPromos([])
+        setLoading(false)
+        return
+      }
+      
+      // If no location selected (admin view), show all promos
+      if (!activeLocation?.id) {
+        setPromos(allPromos)
+        setLoading(false)
+        return
+      }
+      
+      // Try to get location-filtered promos
+      const { data: promoLocs, error: locsError } = await supabase
+        .from('promo_locations')
+        .select('promo_id')
+        .eq('location_id', activeLocation.id)
+      
+      // If promo_locations table doesn't exist or query fails, show all promos
+      if (locsError) {
+        console.log('promo_locations query failed (table may not exist), showing all promos:', locsError)
+        setPromos(allPromos)
+        setLoading(false)
+        return
+      }
+      
+      // If no location associations exist at all, show all promos (backward compatibility)
+      const { count } = await supabase
+        .from('promo_locations')
+        .select('*', { count: 'exact', head: true })
+      
+      if (count === 0) {
+        // No location restrictions set up yet, show all promos
+        setPromos(allPromos)
+        setLoading(false)
+        return
+      }
+      
+      // Filter promos by location
+      const locationPromoIds = promoLocs?.map(pl => pl.promo_id) || []
+      
+      if (locationPromoIds.length === 0) {
+        // This location has no promos assigned
+        setPromos([])
+        setLoading(false)
+        return
+      }
+      
+      const filteredPromos = allPromos.filter(p => locationPromoIds.includes(p.id))
+      setPromos(filteredPromos)
+      
     } catch (error) {
       console.error('Error fetching promos:', error)
     } finally {
