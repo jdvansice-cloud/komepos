@@ -67,7 +67,11 @@ export function OrdersPage() {
         .order('created_at', { ascending: false })
         .limit(50)
 
-      if (error) throw error
+      if (error) {
+        console.error('Orders fetch error:', error)
+        throw error
+      }
+      console.log('Orders fetched:', data?.length || 0)
       setOrders(data || [])
     } catch (error) {
       console.error('Error fetching orders:', error)
