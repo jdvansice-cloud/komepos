@@ -169,9 +169,6 @@ export function POSPage() {
       setSearchParams({})
     }
   }
-      setSearchParams({})
-    }
-  }
   
   function cancelRefundMode() {
     setIsRefundMode(false)
