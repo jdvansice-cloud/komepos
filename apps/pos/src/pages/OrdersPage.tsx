@@ -294,94 +294,112 @@ export function OrdersPage() {
         </div>
       ) : (
         <div className="grid gap-4">
-          {filteredOrders.map(order => (
-            <div key={order.id} className="bg-white rounded-lg shadow p-6">
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  {/* Customer Name - Prominent */}
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="text-xl">👤</span>
-                    <h3 className="text-lg font-bold text-gray-800">
-                      {order.customer?.full_name || 'Walk-in Customer'}
-                    </h3>
-                  </div>
-                  
-                  {/* Order info row */}
-                  <div className="flex items-center gap-3 mb-1">
-                    <span className="text-sm font-mono text-gray-500">#{order.order_number}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[order.status] || 'bg-gray-100'}`}>
-                      {order.status?.replace('_', ' ')}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">
-                      {orderTypeLabels[order.order_type] || order.order_type}
-                    </span>
-                    {order.payment_status === 'refunded' && (
-                      <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-600 font-medium">
-                        Refunded
+          {filteredOrders.map(order => {
+            const isRefundOrder = order.order_number?.startsWith('REF-')
+            
+            return (
+              <div 
+                key={order.id} 
+                className={`rounded-lg shadow p-6 ${isRefundOrder ? 'bg-red-50 border border-red-200' : 'bg-white'}`}
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    {/* Customer Name - Prominent */}
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className="text-xl">{isRefundOrder ? '↩️' : '👤'}</span>
+                      <h3 className={`text-lg font-bold ${isRefundOrder ? 'text-red-800' : 'text-gray-800'}`}>
+                        {order.customer?.full_name || 'Walk-in Customer'}
+                      </h3>
+                      {isRefundOrder && (
+                        <span className="px-2 py-0.5 rounded-full text-xs bg-red-600 text-white font-medium">
+                          REFUND
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Order info row */}
+                    <div className="flex items-center gap-3 mb-1 flex-wrap">
+                      <span className={`text-sm font-mono ${isRefundOrder ? 'text-red-600' : 'text-gray-500'}`}>
+                        #{order.order_number}
                       </span>
-                    )}
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[order.status] || 'bg-gray-100'}`}>
+                        {order.status?.replace('_', ' ')}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">
+                        {orderTypeLabels[order.order_type] || order.order_type}
+                      </span>
+                      {/* Show "Refunded" badge on ORIGINAL orders that were refunded (not on refund orders) */}
+                      {!isRefundOrder && order.payment_status === 'refunded' && (
+                        <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-600 font-medium">
+                          Refunded
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Contact & location info */}
+                    <div className="text-sm text-gray-500 space-y-0.5">
+                      {order.customer?.phone && (
+                        <p>📞 {order.customer.phone} {order.customer.email && `• ${order.customer.email}`}</p>
+                      )}
+                      <p>📍 {order.location?.name || 'Unknown location'} • {formatDateTime(order.created_at, timezone)}</p>
+                    </div>
                   </div>
-                  
-                  {/* Contact & location info */}
-                  <div className="text-sm text-gray-500 space-y-0.5">
-                    {order.customer?.phone && (
-                      <p>📞 {order.customer.phone} {order.customer.email && `• ${order.customer.email}`}</p>
-                    )}
-                    <p>📍 {order.location?.name || 'Unknown location'} • {formatDateTime(order.created_at, timezone)}</p>
+                  <div className="text-right">
+                    <p className={`text-2xl font-bold ${isRefundOrder ? 'text-red-600' : 'text-gray-800'}`}>
+                      ${order.total?.toFixed(2)}
+                    </p>
+                    <button
+                      onClick={() => fetchOrderDetails(order.id)}
+                      className="text-blue-600 hover:text-blue-800 text-sm mt-1"
+                    >
+                      View Details →
+                    </button>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-2xl font-bold text-gray-800">${order.total?.toFixed(2)}</p>
+                <div className="flex gap-2 mt-4 pt-4 border-t">
+                  {order.status === 'pending' && (
+                    <>
+                      <button onClick={() => updateStatus(order.id, 'preparing')} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Start Preparing</button>
+                      <button onClick={() => updateStatus(order.id, 'cancelled')} className="text-red-600 border border-red-600 px-4 py-2 rounded-lg hover:bg-red-50">Cancel</button>
+                    </>
+                  )}
+                  {order.status === 'preparing' && (
+                    <button onClick={() => updateStatus(order.id, 'ready')} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">Mark Ready</button>
+                  )}
+                  {order.status === 'ready' && order.order_type === 'delivery' && (
+                    <button onClick={() => updateStatus(order.id, 'out_for_delivery')} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">Out for Delivery</button>
+                  )}
+                  {order.status === 'ready' && order.order_type !== 'delivery' && (
+                    <button onClick={() => updateStatus(order.id, 'completed')} className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700">Complete</button>
+                  )}
+                  {order.status === 'out_for_delivery' && (
+                    <button onClick={() => updateStatus(order.id, 'delivered')} className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700">Mark Delivered</button>
+                  )}
+                  {/* Refund button for completed orders that haven't been refunded and are NOT refund orders */}
+                  {!isRefundOrder && (order.status === 'completed' || order.status === 'delivered') && order.payment_status !== 'refunded' && (
+                    <button
+                      onClick={() => navigate(`/pos?refund=${order.id}`)}
+                      className="text-red-600 border border-red-600 px-4 py-2 rounded-lg hover:bg-red-50"
+                    >
+                      ↩️ Refund
+                    </button>
+                  )}
+                  {/* Show "Refunded" badge for original orders in actions area */}
+                  {!isRefundOrder && order.payment_status === 'refunded' && (
+                    <span className="px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium">
+                      ✓ Refunded
+                    </span>
+                  )}
                   <button
                     onClick={() => fetchOrderDetails(order.id)}
-                    className="text-blue-600 hover:text-blue-800 text-sm mt-1"
+                    className="ml-auto text-gray-600 border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50"
                   >
-                    View Details →
+                    📋 Details
                   </button>
                 </div>
               </div>
-              <div className="flex gap-2 mt-4 pt-4 border-t">
-                {order.status === 'pending' && (
-                  <>
-                    <button onClick={() => updateStatus(order.id, 'preparing')} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Start Preparing</button>
-                    <button onClick={() => updateStatus(order.id, 'cancelled')} className="text-red-600 border border-red-600 px-4 py-2 rounded-lg hover:bg-red-50">Cancel</button>
-                  </>
-                )}
-                {order.status === 'preparing' && (
-                  <button onClick={() => updateStatus(order.id, 'ready')} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">Mark Ready</button>
-                )}
-                {order.status === 'ready' && order.order_type === 'delivery' && (
-                  <button onClick={() => updateStatus(order.id, 'out_for_delivery')} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">Out for Delivery</button>
-                )}
-                {order.status === 'ready' && order.order_type !== 'delivery' && (
-                  <button onClick={() => updateStatus(order.id, 'completed')} className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700">Complete</button>
-                )}
-                {order.status === 'out_for_delivery' && (
-                  <button onClick={() => updateStatus(order.id, 'delivered')} className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700">Mark Delivered</button>
-                )}
-                {/* Refund button for completed orders that haven't been refunded */}
-                {(order.status === 'completed' || order.status === 'delivered') && order.payment_status !== 'refunded' && (
-                  <button
-                    onClick={() => navigate(`/pos?refund=${order.id}`)}
-                    className="text-red-600 border border-red-600 px-4 py-2 rounded-lg hover:bg-red-50"
-                  >
-                    ↩️ Refund
-                  </button>
-                )}
-                {order.payment_status === 'refunded' && (
-                  <span className="px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium">
-                    Refunded
-                  </span>
-                )}
-                <button
-                  onClick={() => fetchOrderDetails(order.id)}
-                  className="ml-auto text-gray-600 border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50"
-                >
-                  📋 Details
-                </button>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

@@ -11,7 +11,19 @@ interface Customer { id: string; full_name: string; phone: string; email: string
 interface DeliveryZone { id: string; name: string; delivery_fee: number }
 interface ItemPromo { id: string; name: string; discount_type: 'item_percentage' | 'item_fixed'; discount_value: number; product_ids: string[] }
 interface PaymentMethod { id: string; name: string; code: string; icon: string; is_active: boolean; requires_change: boolean }
-interface RefundOrder { id: string; order_number: string; payment_method: string; total: number; customer_id: string | null; customer_name: string }
+interface RefundOrder { 
+  id: string
+  order_number: string
+  payment_method: string
+  total: number
+  subtotal: number
+  discount_amount: number
+  delivery_fee: number
+  tax_amount: number
+  order_type: string
+  customer_id: string | null
+  customer_name: string
+}
 
 export function POSPage() {
   const { profile, activeLocation } = useAuth()
@@ -79,14 +91,25 @@ export function POSPage() {
   
   async function loadRefundOrder(orderId: string) {
     try {
-      // Fetch order with items
+      // Fetch order with items (without joins due to RLS issues)
       const { data: order, error: orderError } = await supabase
         .from('orders')
-        .select('*, customer:customers(id, full_name, phone, email)')
+        .select('*')
         .eq('id', orderId)
         .single()
       
       if (orderError) throw orderError
+      
+      // Fetch customer separately if exists
+      let customer = null
+      if (order.customer_id) {
+        const { data: custData } = await supabase
+          .from('customers')
+          .select('id, full_name, phone, email')
+          .eq('id', order.customer_id)
+          .single()
+        customer = custData
+      }
       
       // Fetch order items
       const { data: items, error: itemsError } = await supabase
@@ -96,31 +119,36 @@ export function POSPage() {
       
       if (itemsError) throw itemsError
       
-      // Set refund mode
+      // Set refund mode with ALL original order values
       setIsRefundMode(true)
       setRefundOrder({
         id: order.id,
         order_number: order.order_number,
         payment_method: order.payment_method,
         total: order.total,
+        subtotal: order.subtotal,
+        discount_amount: order.discount_amount || 0,
+        delivery_fee: order.delivery_fee || 0,
+        tax_amount: order.tax_amount,
+        order_type: order.order_type,
         customer_id: order.customer_id,
-        customer_name: order.customer?.full_name || 'Walk-in'
+        customer_name: customer?.full_name || 'Walk-in'
       })
       
       // Set customer
-      if (order.customer) {
-        setSelectedCustomer({ type: 'named', customer: order.customer })
+      if (customer) {
+        setSelectedCustomer({ type: 'named', customer })
       } else {
         setSelectedCustomer({ type: 'walk-in', customer: null })
       }
       
-      // Load items into cart
+      // Load items into cart with original prices from order_items
       const cartItems: CartItem[] = items.map((item: any) => ({
         product: {
           id: item.product_id,
           name: item.product_name,
           description: '',
-          base_price: item.unit_price,
+          base_price: item.unit_price, // Use the original unit price from the order
           image_url: '',
           category_id: '',
           is_taxable: item.is_taxable
@@ -130,19 +158,17 @@ export function POSPage() {
       }))
       setCart(cartItems)
       
-      // Set order notes if any
-      if (order.customer_notes) {
-        setOrderNotes(`REFUND: ${order.customer_notes}`)
-        setShowNotesSection(true)
-      } else {
-        setOrderNotes(`REFUND for order #${order.order_number}`)
-        setShowNotesSection(true)
-      }
+      // Set order notes
+      setOrderNotes(`REFUND for order #${order.order_number}`)
+      setShowNotesSection(true)
       
     } catch (error) {
       console.error('Error loading refund order:', error)
       alert('Error loading order for refund')
       // Clear refund param
+      setSearchParams({})
+    }
+  }
       setSearchParams({})
     }
   }
@@ -414,10 +440,10 @@ export function POSPage() {
     
     try {
       if (isRefundMode && refundOrder) {
-        // Process refund
+        // Process refund using EXACT original order values
         const refundNumber = `REF-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
         
-        // Create refund order with negative amounts
+        // Create refund order with negative amounts matching the original exactly
         const { data: refund, error: refundError } = await supabase
           .from('orders')
           .insert({
@@ -425,13 +451,13 @@ export function POSPage() {
             location_id: activeLocation.id,
             customer_id: selectedCustomer.type === 'named' ? selectedCustomer.customer?.id : null,
             user_id: profile?.id,
-            order_type: 'takeout', // Refunds are always takeout type
+            order_type: refundOrder.order_type, // Keep original order type
             status: 'completed',
-            subtotal: -itemsSubtotal,
-            discount_amount: 0,
-            delivery_fee: 0,
-            tax_amount: -tax,
-            total: -total,
+            subtotal: -refundOrder.subtotal, // Use original subtotal
+            discount_amount: refundOrder.discount_amount, // Keep discount as positive (it reduces the refund)
+            delivery_fee: -refundOrder.delivery_fee, // Negative delivery fee
+            tax_amount: -refundOrder.tax_amount, // Use original tax
+            total: -refundOrder.total, // Use original total
             payment_method: selectedPaymentMethod.code,
             payment_status: 'refunded',
             internal_notes: `REFUND for order #${refundOrder.order_number} (ID: ${refundOrder.id})`,
@@ -442,15 +468,15 @@ export function POSPage() {
 
         if (refundError) throw refundError
 
-        // Create refund items (negative quantities shown as regular for clarity)
+        // Create refund items with negative prices
         const refundItems = cart.map(item => ({
           order_id: refund.id,
           product_id: item.product.id,
           product_name: item.product.name,
           quantity: item.quantity,
-          unit_price: -item.product.base_price, // Negative price for refund
-          line_total: -(item.product.base_price * item.quantity),
-          item_notes: `Refund: ${item.notes || ''}`.trim(),
+          unit_price: -Math.abs(item.product.base_price), // Negative price for refund
+          line_total: -(Math.abs(item.product.base_price) * item.quantity),
+          item_notes: item.notes ? `Refund: ${item.notes}` : 'Refund',
           is_taxable: item.product.is_taxable,
         }))
 
@@ -471,7 +497,7 @@ export function POSPage() {
         setLastOrder({
           orderNumber: refund.order_number,
           customerName,
-          total,
+          total: refundOrder.total, // Use original total for display
           paymentMethod: selectedPaymentMethod.name,
           change: 0,
           isRefund: true
@@ -726,16 +752,44 @@ export function POSPage() {
               <p className="text-gray-600 mb-4">
                 Refund for Order <span className="font-mono font-bold">#{refundOrder?.order_number}</span>
               </p>
-              <div className="bg-gray-100 rounded-lg p-4 text-left">
-                <p className="text-sm text-gray-500 mb-1">Original Payment Method</p>
-                <p className="font-medium text-gray-800 capitalize">{refundOrder?.payment_method}</p>
-                <p className="text-sm text-gray-500 mt-3 mb-1">Customer</p>
-                <p className="font-medium text-gray-800">{refundOrder?.customer_name}</p>
-                <p className="text-sm text-gray-500 mt-3 mb-1">Original Total</p>
-                <p className="font-medium text-gray-800">${refundOrder?.total.toFixed(2)}</p>
+              <div className="bg-gray-100 rounded-lg p-4 text-left space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-500">Payment Method</span>
+                  <span className="font-medium text-gray-800 capitalize">{refundOrder?.payment_method}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-500">Customer</span>
+                  <span className="font-medium text-gray-800">{refundOrder?.customer_name}</span>
+                </div>
+                <div className="border-t pt-2 mt-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-500">Subtotal</span>
+                    <span className="font-medium text-gray-800">${refundOrder?.subtotal.toFixed(2)}</span>
+                  </div>
+                  {(refundOrder?.discount_amount || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-sm text-green-600">Discount</span>
+                      <span className="font-medium text-green-600">-${refundOrder?.discount_amount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {(refundOrder?.delivery_fee || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-500">Delivery Fee</span>
+                      <span className="font-medium text-gray-800">${refundOrder?.delivery_fee.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-500">Tax</span>
+                    <span className="font-medium text-gray-800">${refundOrder?.tax_amount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between border-t pt-2 mt-2">
+                    <span className="font-bold text-gray-800">Total to Refund</span>
+                    <span className="font-bold text-red-600 text-lg">${refundOrder?.total.toFixed(2)}</span>
+                  </div>
+                </div>
               </div>
               <p className="text-sm text-gray-500 mt-4">
-                Review the items in the cart and process the refund using the original payment method.
+                The refund will be processed for the exact amount shown above.
               </p>
             </div>
           </div>
@@ -1010,42 +1064,73 @@ export function POSPage() {
 
         {/* Totals & Actions */}
         <div className="border-t p-4 bg-gray-50">
-          <div className="space-y-2 mb-4">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Items</span>
-              <span className="text-gray-800">${itemsSubtotalFull.toFixed(2)}</span>
-            </div>
-            {promoDiscountTotal > 0 && (
-              <div className="flex justify-between text-sm text-green-600">
-                <span>🏷️ Promo Discounts</span>
-                <span>-${promoDiscountTotal.toFixed(2)}</span>
-              </div>
-            )}
-            {manualDiscountAmount > 0 && (
-              <div className="flex justify-between text-sm text-orange-600">
-                <span>Manual Discount ({discountType === 'percent' ? discountValue + '%' : '$' + discountValue})</span>
-                <span>-${manualDiscountAmount.toFixed(2)}</span>
-              </div>
-            )}
-            {deliveryCharge > 0 && (
+          {isRefundMode && refundOrder ? (
+            /* Refund Mode - Show original order totals */
+            <div className="space-y-2 mb-4">
               <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Delivery ({selectedZone?.name})</span>
-                <span className="text-gray-800">${deliveryCharge.toFixed(2)}</span>
+                <span className="text-gray-600">Subtotal</span>
+                <span className="text-red-600">-${refundOrder.subtotal.toFixed(2)}</span>
               </div>
-            )}
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Subtotal</span>
-              <span className="text-gray-800">${subtotal.toFixed(2)}</span>
+              {refundOrder.discount_amount > 0 && (
+                <div className="flex justify-between text-sm text-green-600">
+                  <span>Discount Applied</span>
+                  <span>+${refundOrder.discount_amount.toFixed(2)}</span>
+                </div>
+              )}
+              {refundOrder.delivery_fee > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Delivery Fee</span>
+                  <span className="text-red-600">-${refundOrder.delivery_fee.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Tax</span>
+                <span className="text-red-600">-${refundOrder.tax_amount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-lg font-bold border-t pt-2">
+                <span>Refund Total</span>
+                <span className="text-red-600">-${refundOrder.total.toFixed(2)}</span>
+              </div>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">ITBMS ({(taxRate * 100).toFixed(0)}%)</span>
-              <span className="text-gray-800">${tax.toFixed(2)}</span>
+          ) : (
+            /* Normal Mode - Show calculated totals */
+            <div className="space-y-2 mb-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Items</span>
+                <span className="text-gray-800">${itemsSubtotalFull.toFixed(2)}</span>
+              </div>
+              {promoDiscountTotal > 0 && (
+                <div className="flex justify-between text-sm text-green-600">
+                  <span>🏷️ Promo Discounts</span>
+                  <span>-${promoDiscountTotal.toFixed(2)}</span>
+                </div>
+              )}
+              {manualDiscountAmount > 0 && (
+                <div className="flex justify-between text-sm text-orange-600">
+                  <span>Manual Discount ({discountType === 'percent' ? discountValue + '%' : '$' + discountValue})</span>
+                  <span>-${manualDiscountAmount.toFixed(2)}</span>
+                </div>
+              )}
+              {deliveryCharge > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Delivery ({selectedZone?.name})</span>
+                  <span className="text-gray-800">${deliveryCharge.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Subtotal</span>
+                <span className="text-gray-800">${subtotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">ITBMS ({(taxRate * 100).toFixed(0)}%)</span>
+                <span className="text-gray-800">${tax.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-lg font-bold border-t pt-2">
+                <span>Total</span>
+                <span className="text-blue-600">${total.toFixed(2)}</span>
+              </div>
             </div>
-            <div className="flex justify-between text-lg font-bold border-t pt-2">
-              <span>Total</span>
-              <span className="text-blue-600">${total.toFixed(2)}</span>
-            </div>
-          </div>
+          )}
           {!selectedCustomer && cart.length > 0 && (
             <p className="text-sm text-amber-600 mb-3 text-center">⚠️ Add a customer to checkout</p>
           )}
@@ -1071,7 +1156,9 @@ export function POSPage() {
                 : 'bg-green-600 hover:bg-green-700'
             }`}
           >
-            {isRefundMode ? `↩️ Refund $${total.toFixed(2)}` : `Charge $${total.toFixed(2)}`}
+            {isRefundMode && refundOrder 
+              ? `↩️ Refund $${refundOrder.total.toFixed(2)}` 
+              : `Charge $${total.toFixed(2)}`}
           </button>
         </div>
       </div>
@@ -1148,7 +1235,7 @@ export function POSPage() {
               <div className="text-center mb-6">
                 <p className="text-sm text-gray-500 mb-1">{isRefundMode ? 'Refund Amount' : 'Total to Pay'}</p>
                 <p className={`text-5xl font-bold ${isRefundMode ? 'text-red-600' : 'text-gray-800'}`}>
-                  {isRefundMode ? '-' : ''}${total.toFixed(2)}
+                  {isRefundMode && refundOrder ? `-$${refundOrder.total.toFixed(2)}` : `$${total.toFixed(2)}`}
                 </p>
               </div>
               
