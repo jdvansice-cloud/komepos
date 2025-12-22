@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { getTodayInTimezone } from '../lib/timezone'
@@ -10,9 +11,11 @@ interface Customer { id: string; full_name: string; phone: string; email: string
 interface DeliveryZone { id: string; name: string; delivery_fee: number }
 interface ItemPromo { id: string; name: string; discount_type: 'item_percentage' | 'item_fixed'; discount_value: number; product_ids: string[] }
 interface PaymentMethod { id: string; name: string; code: string; icon: string; is_active: boolean; requires_change: boolean }
+interface RefundOrder { id: string; order_number: string; payment_method: string; total: number; customer_id: string | null; customer_name: string }
 
 export function POSPage() {
   const { profile, activeLocation } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
@@ -20,6 +23,10 @@ export function POSPage() {
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  
+  // Refund mode
+  const [isRefundMode, setIsRefundMode] = useState(false)
+  const [refundOrder, setRefundOrder] = useState<RefundOrder | null>(null)
   
   // Customer selection
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -52,7 +59,7 @@ export function POSPage() {
   
   // Success modal
   const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [lastOrder, setLastOrder] = useState<{ orderNumber: string; customerName: string; total: number; paymentMethod: string; change: number } | null>(null)
+  const [lastOrder, setLastOrder] = useState<{ orderNumber: string; customerName: string; total: number; paymentMethod: string; change: number; isRefund?: boolean } | null>(null)
   
   // Tax rate
   const [taxRate, setTaxRate] = useState(0.07)
@@ -61,6 +68,94 @@ export function POSPage() {
   const [itemPromos, setItemPromos] = useState<ItemPromo[]>([])
 
   useEffect(() => { fetchData() }, [activeLocation])
+  
+  // Check for refund order in URL params
+  useEffect(() => {
+    const refundOrderId = searchParams.get('refund')
+    if (refundOrderId) {
+      loadRefundOrder(refundOrderId)
+    }
+  }, [searchParams])
+  
+  async function loadRefundOrder(orderId: string) {
+    try {
+      // Fetch order with items
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('*, customer:customers(id, full_name, phone, email)')
+        .eq('id', orderId)
+        .single()
+      
+      if (orderError) throw orderError
+      
+      // Fetch order items
+      const { data: items, error: itemsError } = await supabase
+        .from('order_items')
+        .select('*')
+        .eq('order_id', orderId)
+      
+      if (itemsError) throw itemsError
+      
+      // Set refund mode
+      setIsRefundMode(true)
+      setRefundOrder({
+        id: order.id,
+        order_number: order.order_number,
+        payment_method: order.payment_method,
+        total: order.total,
+        customer_id: order.customer_id,
+        customer_name: order.customer?.full_name || 'Walk-in'
+      })
+      
+      // Set customer
+      if (order.customer) {
+        setSelectedCustomer({ type: 'named', customer: order.customer })
+      } else {
+        setSelectedCustomer({ type: 'walk-in', customer: null })
+      }
+      
+      // Load items into cart
+      const cartItems: CartItem[] = items.map((item: any) => ({
+        product: {
+          id: item.product_id,
+          name: item.product_name,
+          description: '',
+          base_price: item.unit_price,
+          image_url: '',
+          category_id: '',
+          is_taxable: item.is_taxable
+        },
+        quantity: item.quantity,
+        notes: item.item_notes || ''
+      }))
+      setCart(cartItems)
+      
+      // Set order notes if any
+      if (order.customer_notes) {
+        setOrderNotes(`REFUND: ${order.customer_notes}`)
+        setShowNotesSection(true)
+      } else {
+        setOrderNotes(`REFUND for order #${order.order_number}`)
+        setShowNotesSection(true)
+      }
+      
+    } catch (error) {
+      console.error('Error loading refund order:', error)
+      alert('Error loading order for refund')
+      // Clear refund param
+      setSearchParams({})
+    }
+  }
+  
+  function cancelRefundMode() {
+    setIsRefundMode(false)
+    setRefundOrder(null)
+    setCart([])
+    setSelectedCustomer(null)
+    setOrderNotes('')
+    setShowNotesSection(false)
+    setSearchParams({})
+  }
 
   async function fetchData() {
     try {
@@ -298,7 +393,7 @@ export function POSPage() {
 
   async function processPayment() {
     if (cart.length === 0 || !selectedCustomer) return
-    if (orderType === 'delivery' && !selectedZone) {
+    if (!isRefundMode && orderType === 'delivery' && !selectedZone) {
       alert('Please select a delivery zone')
       return
     }
@@ -318,80 +413,161 @@ export function POSPage() {
     setProcessing(true)
     
     try {
-      // Generate order number (timestamp + random)
-      const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
-      
-      // Build notes
-      const notes = [
-        selectedCustomer.type === 'walk-in' ? 'Walk-in customer' : null,
-        discountAmount > 0 ? `Discount: ${discountType === 'percent' ? discountValue + '%' : '$' + discountValue}` : null,
-        orderType === 'delivery' && selectedZone ? `Delivery Zone: ${selectedZone.name}` : null,
-      ].filter(Boolean).join(' | ')
+      if (isRefundMode && refundOrder) {
+        // Process refund
+        const refundNumber = `REF-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
+        
+        // Create refund order with negative amounts
+        const { data: refund, error: refundError } = await supabase
+          .from('orders')
+          .insert({
+            order_number: refundNumber,
+            location_id: activeLocation.id,
+            customer_id: selectedCustomer.type === 'named' ? selectedCustomer.customer?.id : null,
+            user_id: profile?.id,
+            order_type: 'takeout', // Refunds are always takeout type
+            status: 'completed',
+            subtotal: -itemsSubtotal,
+            discount_amount: 0,
+            delivery_fee: 0,
+            tax_amount: -tax,
+            total: -total,
+            payment_method: selectedPaymentMethod.code,
+            payment_status: 'refunded',
+            internal_notes: `REFUND for order #${refundOrder.order_number} (ID: ${refundOrder.id})`,
+            customer_notes: orderNotes || null,
+          })
+          .select()
+          .single()
 
-      // Create order
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert({
-          order_number: orderNumber,
-          location_id: activeLocation.id,
-          customer_id: selectedCustomer.type === 'named' ? selectedCustomer.customer?.id : null,
-          user_id: profile?.id,
-          order_type: orderType,
-          status: orderType === 'delivery' ? 'pending' : 'completed',
-          subtotal: itemsSubtotal,
-          discount_amount: discountAmount,
-          delivery_fee: deliveryCharge,
-          tax_amount: tax,
+        if (refundError) throw refundError
+
+        // Create refund items (negative quantities shown as regular for clarity)
+        const refundItems = cart.map(item => ({
+          order_id: refund.id,
+          product_id: item.product.id,
+          product_name: item.product.name,
+          quantity: item.quantity,
+          unit_price: -item.product.base_price, // Negative price for refund
+          line_total: -(item.product.base_price * item.quantity),
+          item_notes: `Refund: ${item.notes || ''}`.trim(),
+          is_taxable: item.product.is_taxable,
+        }))
+
+        const { error: itemsError } = await supabase
+          .from('order_items')
+          .insert(refundItems)
+
+        if (itemsError) throw itemsError
+        
+        // Update original order status to refunded
+        await supabase
+          .from('orders')
+          .update({ payment_status: 'refunded' })
+          .eq('id', refundOrder.id)
+
+        // Success
+        const customerName = selectedCustomer.type === 'walk-in' ? 'Walk-in' : selectedCustomer.customer?.full_name || 'Customer'
+        setLastOrder({
+          orderNumber: refund.order_number,
+          customerName,
           total,
-          payment_method: selectedPaymentMethod.code,
-          payment_status: 'paid',
-          internal_notes: notes || null,
-          customer_notes: orderNotes || null,
+          paymentMethod: selectedPaymentMethod.name,
+          change: 0,
+          isRefund: true
         })
-        .select()
-        .single()
+        setShowSuccessModal(true)
+        
+        // Reset everything including refund mode
+        setCart([])
+        setSelectedCustomer(null)
+        setSelectedZone(null)
+        setDiscountValue('')
+        setOrderNotes('')
+        setShowDiscountSection(false)
+        setShowNotesSection(false)
+        setShowPaymentModal(false)
+        setCashReceived('')
+        setIsRefundMode(false)
+        setRefundOrder(null)
+        setSearchParams({})
+        
+      } else {
+        // Normal order processing
+        const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
+        
+        // Build notes
+        const notes = [
+          selectedCustomer.type === 'walk-in' ? 'Walk-in customer' : null,
+          discountAmount > 0 ? `Discount: ${discountType === 'percent' ? discountValue + '%' : '$' + discountValue}` : null,
+          orderType === 'delivery' && selectedZone ? `Delivery Zone: ${selectedZone.name}` : null,
+        ].filter(Boolean).join(' | ')
 
-      if (orderError) throw orderError
+        // Create order
+        const { data: order, error: orderError } = await supabase
+          .from('orders')
+          .insert({
+            order_number: orderNumber,
+            location_id: activeLocation.id,
+            customer_id: selectedCustomer.type === 'named' ? selectedCustomer.customer?.id : null,
+            user_id: profile?.id,
+            order_type: orderType,
+            status: orderType === 'delivery' ? 'pending' : 'completed',
+            subtotal: itemsSubtotal,
+            discount_amount: discountAmount,
+            delivery_fee: deliveryCharge,
+            tax_amount: tax,
+            total,
+            payment_method: selectedPaymentMethod.code,
+            payment_status: 'paid',
+            internal_notes: notes || null,
+            customer_notes: orderNotes || null,
+          })
+          .select()
+          .single()
 
-      // Create order items
-      const orderItems = cart.map(item => ({
-        order_id: order.id,
-        product_id: item.product.id,
-        product_name: item.product.name,
-        quantity: item.quantity,
-        unit_price: item.product.base_price,
-        line_total: item.product.base_price * item.quantity,
-        item_notes: item.notes || null,
-        is_taxable: item.product.is_taxable,
-      }))
+        if (orderError) throw orderError
 
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .insert(orderItems)
+        // Create order items
+        const orderItems = cart.map(item => ({
+          order_id: order.id,
+          product_id: item.product.id,
+          product_name: item.product.name,
+          quantity: item.quantity,
+          unit_price: item.product.base_price,
+          line_total: item.product.base_price * item.quantity,
+          item_notes: item.notes || null,
+          is_taxable: item.product.is_taxable,
+        }))
 
-      if (itemsError) throw itemsError
+        const { error: itemsError } = await supabase
+          .from('order_items')
+          .insert(orderItems)
 
-      // Success - store order info and show modal
-      const customerName = selectedCustomer.type === 'walk-in' ? 'Walk-in' : selectedCustomer.customer?.full_name || 'Customer'
-      setLastOrder({
-        orderNumber: order.order_number,
-        customerName,
-        total,
-        paymentMethod: selectedPaymentMethod.name,
-        change: selectedPaymentMethod.requires_change ? change : 0
-      })
-      setShowSuccessModal(true)
-      
-      // Reset cart and payment
-      setCart([])
-      setSelectedCustomer(null)
-      setSelectedZone(null)
-      setDiscountValue('')
-      setOrderNotes('')
-      setShowDiscountSection(false)
-      setShowNotesSection(false)
-      setShowPaymentModal(false)
-      setCashReceived('')
+        if (itemsError) throw itemsError
+
+        // Success - store order info and show modal
+        const customerName = selectedCustomer.type === 'walk-in' ? 'Walk-in' : selectedCustomer.customer?.full_name || 'Customer'
+        setLastOrder({
+          orderNumber: order.order_number,
+          customerName,
+          total,
+          paymentMethod: selectedPaymentMethod.name,
+          change: selectedPaymentMethod.requires_change ? change : 0
+        })
+        setShowSuccessModal(true)
+        
+        // Reset cart and payment
+        setCart([])
+        setSelectedCustomer(null)
+        setSelectedZone(null)
+        setDiscountValue('')
+        setOrderNotes('')
+        setShowDiscountSection(false)
+        setShowNotesSection(false)
+        setShowPaymentModal(false)
+        setCashReceived('')
+      }
       
     } catch (error: any) {
       console.error('Order error details:', error)
@@ -409,110 +585,161 @@ export function POSPage() {
     <div className="h-screen flex bg-gray-100">
       {/* Left Panel - Products */}
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Refund Mode Banner */}
+        {isRefundMode && refundOrder && (
+          <div className="bg-red-600 text-white px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">↩️</span>
+              <div>
+                <p className="font-bold">REFUND MODE</p>
+                <p className="text-sm opacity-90">Processing refund for Order #{refundOrder.order_number}</p>
+              </div>
+            </div>
+            <button
+              onClick={cancelRefundMode}
+              className="px-4 py-2 bg-white text-red-600 rounded-lg font-medium hover:bg-red-50"
+            >
+              Cancel Refund
+            </button>
+          </div>
+        )}
+        
         {/* Header */}
         <div className="bg-white border-b p-4">
           <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold text-gray-800">Point of Sale</h1>
-            <div className="flex-1">
-              <input
-                type="text"
-                placeholder="Search products..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full max-w-md border border-gray-300 rounded-lg px-4 py-2"
-              />
-            </div>
-            <div className="flex gap-2">
-              {(['dine_in', 'takeout', 'phone', 'delivery'] as const).map(type => (
-                <button
-                  key={type}
-                  onClick={() => {
-                    setOrderType(type)
-                    if (type !== 'delivery') setSelectedZone(null)
-                  }}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
-                    orderType === type
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  {type === 'dine_in' ? '🍽️ Dine In' : type === 'takeout' ? '🥡 Takeout' : type === 'phone' ? '📞 Phone' : '🚚 Delivery'}
-                </button>
-              ))}
-            </div>
+            <h1 className="text-xl font-bold text-gray-800">
+              {isRefundMode ? '↩️ Process Refund' : 'Point of Sale'}
+            </h1>
+            {!isRefundMode && (
+              <>
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    placeholder="Search products..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full max-w-md border border-gray-300 rounded-lg px-4 py-2"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  {(['dine_in', 'takeout', 'phone', 'delivery'] as const).map(type => (
+                    <button
+                      key={type}
+                      onClick={() => {
+                        setOrderType(type)
+                        if (type !== 'delivery') setSelectedZone(null)
+                      }}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                        orderType === type
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {type === 'dine_in' ? '🍽️ Dine In' : type === 'takeout' ? '🥡 Takeout' : type === 'phone' ? '📞 Phone' : '🚚 Delivery'}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Categories */}
-        <div className="bg-white border-b px-4 py-2 flex gap-2 overflow-x-auto">
-          <button
-            onClick={() => setSelectedCategory('all')}
-            className={`px-4 py-2 rounded-lg whitespace-nowrap transition ${
-              selectedCategory === 'all'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            All Items
-          </button>
-          {categories.map(cat => (
+        {/* Categories - hide in refund mode */}
+        {!isRefundMode && (
+          <div className="bg-white border-b px-4 py-2 flex gap-2 overflow-x-auto">
             <button
-              key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
+              onClick={() => setSelectedCategory('all')}
               className={`px-4 py-2 rounded-lg whitespace-nowrap transition ${
-                selectedCategory === cat.id
+                selectedCategory === 'all'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              {cat.name}
+              All Items
             </button>
-          ))}
-        </div>
+            {categories.map(cat => (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id)}
+                className={`px-4 py-2 rounded-lg whitespace-nowrap transition ${
+                  selectedCategory === cat.id
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {cat.name}
+              </button>
+            ))}
+          </div>
+        )}
 
-        {/* Products Grid */}
-        <div className="flex-1 overflow-auto p-4">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            {filteredProducts.map(product => {
-              const promoInfo = calculatePromoDiscount(product)
-              const hasPromo = promoInfo !== null
-              const discountedPrice = hasPromo 
-                ? product.base_price - promoInfo.discount 
-                : product.base_price
-              
-              return (
-                <button
-                  key={product.id}
-                  onClick={() => addToCart(product)}
-                  className={`rounded-lg shadow hover:shadow-md transition p-3 text-left relative ${hasPromo ? 'bg-green-50 border-2 border-green-300' : 'bg-white'}`}
-                >
-                  {hasPromo && (
-                    <div className="absolute -top-2 -right-2 bg-green-600 text-white text-xs px-2 py-0.5 rounded-full">
-                      🏷️ Sale
-                    </div>
-                  )}
-                  {product.image_url ? (
-                    <img src={product.image_url} alt={product.name} className="w-full h-24 object-cover rounded-lg mb-2" />
-                  ) : (
-                    <div className="w-full h-24 bg-gray-100 rounded-lg mb-2 flex items-center justify-center text-3xl">🍔</div>
-                  )}
-                  <h3 className="font-medium text-gray-800 text-sm truncate">{product.name}</h3>
-                  {hasPromo ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-400 line-through text-sm">${product.base_price.toFixed(2)}</span>
-                      <span className="text-green-600 font-bold">${discountedPrice.toFixed(2)}</span>
-                    </div>
-                  ) : (
-                    <p className="text-blue-600 font-bold">${product.base_price.toFixed(2)}</p>
-                  )}
-                </button>
-              )
+        {/* Products Grid - hide in refund mode */}
+        {!isRefundMode ? (
+          <div className="flex-1 overflow-auto p-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+              {filteredProducts.map(product => {
+                const promoInfo = calculatePromoDiscount(product)
+                const hasPromo = promoInfo !== null
+                const discountedPrice = hasPromo 
+                  ? product.base_price - promoInfo.discount 
+                  : product.base_price
+                
+                return (
+                  <button
+                    key={product.id}
+                    onClick={() => addToCart(product)}
+                    className={`rounded-lg shadow hover:shadow-md transition p-3 text-left relative ${hasPromo ? 'bg-green-50 border-2 border-green-300' : 'bg-white'}`}
+                  >
+                    {hasPromo && (
+                      <div className="absolute -top-2 -right-2 bg-green-600 text-white text-xs px-2 py-0.5 rounded-full">
+                        🏷️ Sale
+                      </div>
+                    )}
+                    {product.image_url ? (
+                      <img src={product.image_url} alt={product.name} className="w-full h-24 object-cover rounded-lg mb-2" />
+                    ) : (
+                      <div className="w-full h-24 bg-gray-100 rounded-lg mb-2 flex items-center justify-center text-3xl">🍔</div>
+                    )}
+                    <h3 className="font-medium text-gray-800 text-sm truncate">{product.name}</h3>
+                    {hasPromo ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-400 line-through text-sm">${product.base_price.toFixed(2)}</span>
+                        <span className="text-green-600 font-bold">${discountedPrice.toFixed(2)}</span>
+                      </div>
+                    ) : (
+                      <p className="text-blue-600 font-bold">${product.base_price.toFixed(2)}</p>
+                    )}
+                  </button>
+                )
             })}
           </div>
           {filteredProducts.length === 0 && (
             <p className="text-center text-gray-500 py-8">No products found</p>
           )}
         </div>
+        ) : (
+          /* Refund Mode Info Panel */
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="text-center max-w-md">
+              <div className="text-6xl mb-4">↩️</div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">Processing Refund</h2>
+              <p className="text-gray-600 mb-4">
+                Refund for Order <span className="font-mono font-bold">#{refundOrder?.order_number}</span>
+              </p>
+              <div className="bg-gray-100 rounded-lg p-4 text-left">
+                <p className="text-sm text-gray-500 mb-1">Original Payment Method</p>
+                <p className="font-medium text-gray-800 capitalize">{refundOrder?.payment_method}</p>
+                <p className="text-sm text-gray-500 mt-3 mb-1">Customer</p>
+                <p className="font-medium text-gray-800">{refundOrder?.customer_name}</p>
+                <p className="text-sm text-gray-500 mt-3 mb-1">Original Total</p>
+                <p className="font-medium text-gray-800">${refundOrder?.total.toFixed(2)}</p>
+              </div>
+              <p className="text-sm text-gray-500 mt-4">
+                Review the items in the cart and process the refund using the original payment method.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Right Panel - Cart */}
@@ -822,15 +1049,29 @@ export function POSPage() {
           {!selectedCustomer && cart.length > 0 && (
             <p className="text-sm text-amber-600 mb-3 text-center">⚠️ Add a customer to checkout</p>
           )}
-          {orderType === 'delivery' && !selectedZone && cart.length > 0 && (
+          {!isRefundMode && orderType === 'delivery' && !selectedZone && cart.length > 0 && (
             <p className="text-sm text-amber-600 mb-3 text-center">⚠️ Select a delivery zone</p>
           )}
           <button
-            onClick={() => { setSelectedPaymentMethod(null); setCashReceived(''); setShowPaymentModal(true) }}
-            disabled={cart.length === 0 || !selectedCustomer || (orderType === 'delivery' && !selectedZone)}
-            className="w-full px-4 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => { 
+              if (isRefundMode && refundOrder) {
+                // Pre-select the original payment method
+                const originalMethod = paymentMethods.find(m => m.code === refundOrder.payment_method)
+                setSelectedPaymentMethod(originalMethod || null)
+              } else {
+                setSelectedPaymentMethod(null)
+              }
+              setCashReceived('')
+              setShowPaymentModal(true) 
+            }}
+            disabled={cart.length === 0 || !selectedCustomer || (!isRefundMode && orderType === 'delivery' && !selectedZone)}
+            className={`w-full px-4 py-3 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
+              isRefundMode 
+                ? 'bg-red-600 hover:bg-red-700' 
+                : 'bg-green-600 hover:bg-green-700'
+            }`}
           >
-            Charge ${total.toFixed(2)}
+            {isRefundMode ? `↩️ Refund $${total.toFixed(2)}` : `Charge $${total.toFixed(2)}`}
           </button>
         </div>
       </div>
@@ -881,8 +1122,10 @@ export function POSPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
             {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="text-xl font-bold text-gray-800">Payment</h2>
+            <div className={`flex items-center justify-between p-4 border-b ${isRefundMode ? 'bg-red-50' : ''}`}>
+              <h2 className={`text-xl font-bold ${isRefundMode ? 'text-red-700' : 'text-gray-800'}`}>
+                {isRefundMode ? '↩️ Process Refund' : 'Payment'}
+              </h2>
               <button
                 onClick={() => { setShowPaymentModal(false); setCashReceived('') }}
                 className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
@@ -892,62 +1135,107 @@ export function POSPage() {
             </div>
             
             <div className="p-6">
+              {/* Refund Info Banner */}
+              {isRefundMode && refundOrder && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+                  <p className="text-sm text-red-600 font-medium mb-1">Refunding Order</p>
+                  <p className="font-mono font-bold text-red-800">#{refundOrder.order_number}</p>
+                  <p className="text-sm text-red-600 mt-2">Original payment: <span className="font-medium capitalize">{refundOrder.payment_method}</span></p>
+                </div>
+              )}
+              
               {/* Total Amount */}
               <div className="text-center mb-6">
-                <p className="text-sm text-gray-500 mb-1">Total to Pay</p>
-                <p className="text-5xl font-bold text-gray-800">${total.toFixed(2)}</p>
+                <p className="text-sm text-gray-500 mb-1">{isRefundMode ? 'Refund Amount' : 'Total to Pay'}</p>
+                <p className={`text-5xl font-bold ${isRefundMode ? 'text-red-600' : 'text-gray-800'}`}>
+                  {isRefundMode ? '-' : ''}${total.toFixed(2)}
+                </p>
               </div>
               
-              {/* Payment Methods */}
-              <p className="text-sm font-medium text-gray-600 mb-3">Select Payment Method</p>
-              {(() => {
-                const primaryMethods = paymentMethods.filter(m => m.code === 'cash' || m.code === 'card')
-                const secondaryMethods = paymentMethods.filter(m => m.code !== 'cash' && m.code !== 'card')
-                
-                return (
-                  <>
-                    {/* Primary Payment Methods (Cash & Card) */}
-                    <div className="grid grid-cols-2 gap-3 mb-3">
-                      {primaryMethods.map(method => (
-                        <button
-                          key={method.id}
-                          onClick={() => { setSelectedPaymentMethod(method); if (!method.requires_change) setCashReceived('') }}
-                          className={`p-6 rounded-xl border-2 transition flex flex-col items-center gap-2 ${
-                            selectedPaymentMethod?.id === method.id
-                              ? 'border-blue-500 bg-blue-50 text-blue-700'
-                              : 'border-gray-200 hover:border-gray-300 text-gray-700'
-                          }`}
-                        >
-                          <span className="text-3xl">{method.icon}</span>
-                          <span className="font-medium">{method.name}</span>
-                        </button>
-                      ))}
-                    </div>
+              {/* Payment Methods - Show only original method in refund mode */}
+              {isRefundMode && refundOrder ? (
+                <>
+                  <p className="text-sm font-medium text-gray-600 mb-3">Refund Payment Method</p>
+                  <div className="mb-4">
+                    {(() => {
+                      const originalMethod = paymentMethods.find(m => m.code === refundOrder.payment_method)
+                      if (originalMethod) {
+                        return (
+                          <div className="p-4 rounded-xl border-2 border-red-500 bg-red-50 flex items-center gap-3">
+                            <span className="text-3xl">{originalMethod.icon}</span>
+                            <div>
+                              <span className="font-medium text-red-700">{originalMethod.name}</span>
+                              <p className="text-xs text-red-600">Same as original order</p>
+                            </div>
+                          </div>
+                        )
+                      } else {
+                        return (
+                          <div className="p-4 rounded-xl border-2 border-gray-300 bg-gray-50 flex items-center gap-3">
+                            <span className="text-3xl">💳</span>
+                            <div>
+                              <span className="font-medium text-gray-700 capitalize">{refundOrder.payment_method}</span>
+                              <p className="text-xs text-gray-500">Original payment method</p>
+                            </div>
+                          </div>
+                        )
+                      }
+                    })()}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-gray-600 mb-3">Select Payment Method</p>
+                  {(() => {
+                    const primaryMethods = paymentMethods.filter(m => m.code === 'cash' || m.code === 'card')
+                    const secondaryMethods = paymentMethods.filter(m => m.code !== 'cash' && m.code !== 'card')
                     
-                    {/* Secondary Payment Methods */}
-                    {secondaryMethods.length > 0 && (
-                      <div className="grid grid-cols-3 gap-2 mb-4">
-                        {secondaryMethods.map(method => (
-                          <button
-                            key={method.id}
-                            onClick={() => { setSelectedPaymentMethod(method); if (!method.requires_change) setCashReceived('') }}
-                            className={`py-3 px-4 rounded-xl border transition text-sm font-medium ${
-                              selectedPaymentMethod?.id === method.id
-                                ? 'border-blue-500 bg-blue-50 text-blue-700'
-                                : 'border-gray-200 hover:border-gray-300 text-gray-600'
-                            }`}
-                          >
-                            {method.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )
-              })()}
+                    return (
+                      <>
+                        {/* Primary Payment Methods (Cash & Card) */}
+                        <div className="grid grid-cols-2 gap-3 mb-3">
+                          {primaryMethods.map(method => (
+                            <button
+                              key={method.id}
+                              onClick={() => { setSelectedPaymentMethod(method); if (!method.requires_change) setCashReceived('') }}
+                              className={`p-6 rounded-xl border-2 transition flex flex-col items-center gap-2 ${
+                                selectedPaymentMethod?.id === method.id
+                                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                                  : 'border-gray-200 hover:border-gray-300 text-gray-700'
+                              }`}
+                            >
+                              <span className="text-3xl">{method.icon}</span>
+                              <span className="font-medium">{method.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                        
+                        {/* Secondary Payment Methods */}
+                        {secondaryMethods.length > 0 && (
+                          <div className="grid grid-cols-3 gap-2 mb-4">
+                            {secondaryMethods.map(method => (
+                              <button
+                                key={method.id}
+                                onClick={() => { setSelectedPaymentMethod(method); if (!method.requires_change) setCashReceived('') }}
+                                className={`py-3 px-4 rounded-xl border transition text-sm font-medium ${
+                                  selectedPaymentMethod?.id === method.id
+                                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                                    : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                                }`}
+                              >
+                                {method.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()}
+                </>
+              )}
               
-              {/* Change Calculator - Only for cash/requires_change methods */}
-              {selectedPaymentMethod?.requires_change && (
+              {/* Change Calculator - Only for cash/requires_change methods (not in refund mode) */}
+              {!isRefundMode && selectedPaymentMethod?.requires_change && (
                 <div className="bg-gray-50 rounded-xl p-4 mb-6">
                   <p className="text-sm font-medium text-gray-600 mb-3">Change Calculator</p>
                   
@@ -1004,11 +1292,13 @@ export function POSPage() {
               {/* Process Button */}
               <button
                 onClick={processPayment}
-                disabled={processing || !selectedPaymentMethod || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)}
-                className={`w-full py-4 rounded-xl font-bold text-lg transition flex items-center justify-center gap-2 ${!selectedPaymentMethod?.requires_change ? 'mt-4' : ''} ${
-                  processing || !selectedPaymentMethod || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)
+                disabled={processing || (!isRefundMode && !selectedPaymentMethod) || (!isRefundMode && selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)}
+                className={`w-full py-4 rounded-xl font-bold text-lg transition flex items-center justify-center gap-2 ${!isRefundMode && !selectedPaymentMethod?.requires_change ? 'mt-4' : ''} ${
+                  processing || (!isRefundMode && !selectedPaymentMethod) || (!isRefundMode && selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)
                     ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                    : 'bg-green-600 text-white hover:bg-green-700'
+                    : isRefundMode 
+                      ? 'bg-red-600 text-white hover:bg-red-700'
+                      : 'bg-green-600 text-white hover:bg-green-700'
                 }`}
               >
                 {processing ? (
@@ -1017,7 +1307,12 @@ export function POSPage() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    Processing...
+                    {isRefundMode ? 'Processing Refund...' : 'Processing...'}
+                  </>
+                ) : isRefundMode ? (
+                  <>
+                    <span>↩️</span>
+                    <span>Process Refund</span>
                   </>
                 ) : !selectedPaymentMethod ? (
                   <span>Select a payment method</span>
@@ -1093,32 +1388,44 @@ export function POSPage() {
 
       {/* Order Success Modal */}
       {showSuccessModal && lastOrder && (
-        <div className="fixed inset-0 bg-green-600 z-50 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${lastOrder.isRefund ? 'bg-red-600' : 'bg-green-600'}`}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 text-center">
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg className="w-12 h-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
-              </svg>
+            <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${lastOrder.isRefund ? 'bg-red-100' : 'bg-green-100'}`}>
+              {lastOrder.isRefund ? (
+                <span className="text-4xl">↩️</span>
+              ) : (
+                <svg className="w-12 h-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                </svg>
+              )}
             </div>
             
-            <h2 className="text-3xl font-bold text-gray-800 mb-2">Order Complete!</h2>
+            <h2 className="text-3xl font-bold text-gray-800 mb-2">
+              {lastOrder.isRefund ? 'Refund Complete!' : 'Order Complete!'}
+            </h2>
             
-            <div className="bg-gray-100 rounded-xl p-6 my-6">
-              <p className="text-sm text-gray-500 uppercase tracking-wide mb-1">Order Number</p>
-              <p className="text-3xl font-bold text-gray-800 font-mono">{lastOrder.orderNumber}</p>
+            <div className={`rounded-xl p-6 my-6 ${lastOrder.isRefund ? 'bg-red-50' : 'bg-gray-100'}`}>
+              <p className="text-sm text-gray-500 uppercase tracking-wide mb-1">
+                {lastOrder.isRefund ? 'Refund Number' : 'Order Number'}
+              </p>
+              <p className={`text-3xl font-bold font-mono ${lastOrder.isRefund ? 'text-red-700' : 'text-gray-800'}`}>
+                {lastOrder.orderNumber}
+              </p>
               <p className="text-gray-600 mt-2">{lastOrder.customerName}</p>
             </div>
             
             <div className="space-y-3 mb-6">
               <div className="flex justify-between items-center text-lg">
-                <span className="text-gray-500">Total</span>
-                <span className="font-bold text-gray-800">${lastOrder.total.toFixed(2)}</span>
+                <span className="text-gray-500">{lastOrder.isRefund ? 'Refund Amount' : 'Total'}</span>
+                <span className={`font-bold ${lastOrder.isRefund ? 'text-red-600' : 'text-gray-800'}`}>
+                  {lastOrder.isRefund ? '-' : ''}${lastOrder.total.toFixed(2)}
+                </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-500">Payment</span>
+                <span className="text-gray-500">Payment Method</span>
                 <span className="font-medium text-gray-800">{lastOrder.paymentMethod}</span>
               </div>
-              {lastOrder.change > 0 && (
+              {lastOrder.change > 0 && !lastOrder.isRefund && (
                 <div className="flex justify-between items-center text-xl pt-3 border-t-2 border-dashed">
                   <span className="text-gray-700 font-medium">Change Due</span>
                   <span className="font-bold text-green-600 text-2xl">${lastOrder.change.toFixed(2)}</span>
@@ -1128,9 +1435,13 @@ export function POSPage() {
             
             <button
               onClick={() => { setShowSuccessModal(false); setLastOrder(null) }}
-              className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold text-lg hover:bg-blue-700 transition"
+              className={`w-full py-4 text-white rounded-xl font-bold text-lg transition ${
+                lastOrder.isRefund 
+                  ? 'bg-red-600 hover:bg-red-700' 
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
-              Start New Order
+              {lastOrder.isRefund ? 'Done' : 'Start New Order'}
             </button>
           </div>
         </div>
