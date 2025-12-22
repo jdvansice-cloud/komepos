@@ -826,7 +826,7 @@ export function POSPage() {
             <p className="text-sm text-amber-600 mb-3 text-center">⚠️ Select a delivery zone</p>
           )}
           <button
-            onClick={() => setShowPaymentModal(true)}
+            onClick={() => { setSelectedPaymentMethod(null); setCashReceived(''); setShowPaymentModal(true) }}
             disabled={cart.length === 0 || !selectedCustomer || (orderType === 'delivery' && !selectedZone)}
             className="w-full px-4 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -898,14 +898,16 @@ export function POSPage() {
                 <p className="text-5xl font-bold text-gray-800">${total.toFixed(2)}</p>
               </div>
               
-              {/* Primary Payment Methods (Cash & Card) */}
+              {/* Payment Methods */}
+              <p className="text-sm font-medium text-gray-600 mb-3">Select Payment Method</p>
               {(() => {
                 const primaryMethods = paymentMethods.filter(m => m.code === 'cash' || m.code === 'card')
                 const secondaryMethods = paymentMethods.filter(m => m.code !== 'cash' && m.code !== 'card')
                 
                 return (
                   <>
-                    <div className="grid grid-cols-2 gap-3 mb-4">
+                    {/* Primary Payment Methods (Cash & Card) */}
+                    <div className="grid grid-cols-2 gap-3 mb-3">
                       {primaryMethods.map(method => (
                         <button
                           key={method.id}
@@ -924,7 +926,7 @@ export function POSPage() {
                     
                     {/* Secondary Payment Methods */}
                     {secondaryMethods.length > 0 && (
-                      <div className="grid grid-cols-3 gap-2 mb-6">
+                      <div className="grid grid-cols-3 gap-2 mb-4">
                         {secondaryMethods.map(method => (
                           <button
                             key={method.id}
@@ -1003,7 +1005,7 @@ export function POSPage() {
               <button
                 onClick={processPayment}
                 disabled={processing || !selectedPaymentMethod || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)}
-                className={`w-full py-4 rounded-xl font-bold text-lg transition flex items-center justify-center gap-2 ${
+                className={`w-full py-4 rounded-xl font-bold text-lg transition flex items-center justify-center gap-2 ${!selectedPaymentMethod?.requires_change ? 'mt-4' : ''} ${
                   processing || !selectedPaymentMethod || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)
                     ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                     : 'bg-green-600 text-white hover:bg-green-700'
@@ -1017,6 +1019,10 @@ export function POSPage() {
                     </svg>
                     Processing...
                   </>
+                ) : !selectedPaymentMethod ? (
+                  <span>Select a payment method</span>
+                ) : selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total ? (
+                  <span>Enter cash amount</span>
                 ) : (
                   <>
                     <span>✓</span>
