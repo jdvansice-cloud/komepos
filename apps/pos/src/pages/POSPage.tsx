@@ -811,109 +811,195 @@ export function POSPage() {
         </div>
       )}
 
-      {/* Payment Modal */}
+      {/* Payment Modal - Full Screen POS Style */}
       {showPaymentModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h2 className="text-xl font-bold mb-4">Payment</h2>
-            
-            <div className="text-center mb-6">
-              <p className="text-sm text-gray-500">Total Amount</p>
-              <p className="text-4xl font-bold text-blue-600">${total.toFixed(2)}</p>
+        <div className="fixed inset-0 bg-gray-900 z-50 flex">
+          {/* Left Panel - Payment Methods */}
+          <div className="w-80 bg-gray-800 p-4 flex flex-col">
+            <h2 className="text-white text-lg font-bold mb-4">Payment Method</h2>
+            <div className="flex-1 space-y-2">
+              {paymentMethods.map(method => (
+                <button
+                  key={method.id}
+                  onClick={() => { setSelectedPaymentMethod(method); setCashReceived('') }}
+                  className={`w-full p-4 rounded-lg font-medium transition flex items-center gap-3 ${
+                    selectedPaymentMethod?.id === method.id
+                      ? 'bg-blue-600 text-white ring-2 ring-blue-400'
+                      : 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+                  }`}
+                >
+                  <span className="text-2xl">{method.icon}</span>
+                  <span className="text-lg">{method.name}</span>
+                </button>
+              ))}
             </div>
+            <button
+              onClick={() => { setShowPaymentModal(false); setCashReceived('') }}
+              className="mt-4 w-full py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition"
+            >
+              ✕ Cancel
+            </button>
+          </div>
 
-            <div className="mb-6">
-              <p className="text-sm font-medium text-gray-700 mb-2">Payment Method</p>
-              <div className={`grid gap-2 ${paymentMethods.length <= 2 ? 'grid-cols-2' : paymentMethods.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3'}`}>
-                {paymentMethods.map(method => (
-                  <button
-                    key={method.id}
-                    onClick={() => { setSelectedPaymentMethod(method); setCashReceived('') }}
-                    className={`py-3 rounded-lg font-medium transition flex items-center justify-center gap-2 ${
-                      selectedPaymentMethod?.id === method.id
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    <span>{method.icon}</span>
-                    <span>{method.name}</span>
-                  </button>
-                ))}
+          {/* Right Panel - Amount Entry */}
+          <div className="flex-1 bg-gray-100 p-6 flex flex-col">
+            {/* Amount Display */}
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <p className="text-sm text-gray-500 uppercase tracking-wide">Total Due</p>
+                  <p className="text-3xl font-bold text-gray-800">${total.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 uppercase tracking-wide">Tendered</p>
+                  <p className="text-3xl font-bold text-blue-600">
+                    ${selectedPaymentMethod?.requires_change ? (parseFloat(cashReceived || '0')).toFixed(2) : total.toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 uppercase tracking-wide">Change</p>
+                  <p className={`text-3xl font-bold ${change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    ${selectedPaymentMethod?.requires_change ? Math.max(0, change).toFixed(2) : '0.00'}
+                  </p>
+                </div>
               </div>
             </div>
 
-            {selectedPaymentMethod?.requires_change && (
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Cash Received</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={cashReceived}
-                  onChange={(e) => setCashReceived(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full border border-gray-300 rounded-lg px-4 py-3 text-xl text-center"
-                  autoFocus
-                />
-                
-                {/* Quick Cash Denominations */}
-                <div className="grid grid-cols-4 gap-2 mt-3">
-                  {[1, 5, 10, 20].map(amount => (
+            {selectedPaymentMethod?.requires_change ? (
+              <>
+                {/* Quick Tender Buttons */}
+                <div className="mb-4">
+                  <p className="text-sm font-medium text-gray-600 mb-2">Quick Tender</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      Math.ceil(total), // Round up to nearest dollar
+                      Math.ceil(total / 5) * 5, // Round up to nearest $5
+                      Math.ceil(total / 10) * 10, // Round up to nearest $10
+                      Math.ceil(total / 20) * 20, // Round up to nearest $20
+                    ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 4).map(amount => (
+                      <button
+                        key={amount}
+                        onClick={() => setCashReceived(amount.toString())}
+                        className={`py-3 rounded-lg font-bold text-lg transition ${
+                          parseFloat(cashReceived || '0') === amount
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white text-gray-800 hover:bg-blue-50 border-2 border-gray-200'
+                        }`}
+                      >
+                        ${amount}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 mt-2">
+                    {[50, 100].map(amount => (
+                      <button
+                        key={amount}
+                        onClick={() => setCashReceived(amount.toString())}
+                        className={`py-3 rounded-lg font-bold text-lg transition ${
+                          parseFloat(cashReceived || '0') === amount
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white text-gray-800 hover:bg-blue-50 border-2 border-gray-200'
+                        }`}
+                      >
+                        ${amount}
+                      </button>
+                    ))}
                     <button
-                      key={amount}
-                      onClick={() => setCashReceived(prev => (parseFloat(prev || '0') + amount).toString())}
-                      className="py-2 bg-green-100 text-green-700 rounded-lg font-medium hover:bg-green-200 transition"
+                      onClick={() => setCashReceived(total.toFixed(2))}
+                      className="py-3 bg-green-100 text-green-700 rounded-lg font-bold text-lg hover:bg-green-200 transition border-2 border-green-300"
                     >
-                      +${amount}
+                      Exact
                     </button>
-                  ))}
-                </div>
-                <div className="grid grid-cols-3 gap-2 mt-2">
-                  {[50, 100].map(amount => (
                     <button
-                      key={amount}
-                      onClick={() => setCashReceived(prev => (parseFloat(prev || '0') + amount).toString())}
-                      className="py-2 bg-green-100 text-green-700 rounded-lg font-medium hover:bg-green-200 transition"
+                      onClick={() => setCashReceived('')}
+                      className="py-3 bg-gray-200 text-gray-600 rounded-lg font-bold text-lg hover:bg-gray-300 transition"
                     >
-                      +${amount}
+                      Clear
                     </button>
-                  ))}
-                  <button
-                    onClick={() => setCashReceived(total.toFixed(2))}
-                    className="py-2 bg-blue-100 text-blue-700 rounded-lg font-medium hover:bg-blue-200 transition"
-                  >
-                    Exact
-                  </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setCashReceived('')}
-                  className="w-full mt-2 py-2 bg-gray-100 text-gray-600 rounded-lg font-medium hover:bg-gray-200 transition"
-                >
-                  Clear
-                </button>
-                
-                {change > 0 && (
-                  <p className="text-center mt-3 text-lg">
-                    Change: <span className="font-bold text-green-600">${change.toFixed(2)}</span>
-                  </p>
-                )}
+
+                {/* Numpad */}
+                <div className="flex-1 flex flex-col">
+                  <p className="text-sm font-medium text-gray-600 mb-2">Enter Amount</p>
+                  <div className="bg-white rounded-xl shadow p-4 flex-1 flex flex-col">
+                    <input
+                      type="text"
+                      value={cashReceived}
+                      readOnly
+                      placeholder="0.00"
+                      className="w-full text-right text-4xl font-bold text-gray-800 mb-4 border-b-2 border-gray-200 pb-2 outline-none"
+                    />
+                    <div className="grid grid-cols-3 gap-2 flex-1">
+                      {['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '⌫'].map(key => (
+                        <button
+                          key={key}
+                          onClick={() => {
+                            if (key === '⌫') {
+                              setCashReceived(prev => prev.slice(0, -1))
+                            } else if (key === '.') {
+                              if (!cashReceived.includes('.')) {
+                                setCashReceived(prev => prev + '.')
+                              }
+                            } else {
+                              setCashReceived(prev => {
+                                const newVal = prev + key
+                                // Limit to 2 decimal places
+                                if (newVal.includes('.') && newVal.split('.')[1]?.length > 2) return prev
+                                return newVal
+                              })
+                            }
+                          }}
+                          className={`rounded-lg font-bold text-2xl transition ${
+                            key === '⌫' 
+                              ? 'bg-red-100 text-red-600 hover:bg-red-200' 
+                              : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                          }`}
+                          style={{ minHeight: '60px' }}
+                        >
+                          {key}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* Non-cash payment - just show confirmation */
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-6xl mb-4">{selectedPaymentMethod?.icon}</div>
+                  <p className="text-xl text-gray-600 mb-2">Ready to process</p>
+                  <p className="text-4xl font-bold text-blue-600">{selectedPaymentMethod?.name}</p>
+                  <p className="text-gray-500 mt-4">Click "Complete Payment" to finalize</p>
+                </div>
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => { setShowPaymentModal(false); setCashReceived('') }}
-                className="py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={processPayment}
-                disabled={processing || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)}
-                className="py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {processing ? 'Processing...' : 'Complete Payment'}
-              </button>
-            </div>
+            {/* Complete Button */}
+            <button
+              onClick={processPayment}
+              disabled={processing || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)}
+              className={`mt-4 w-full py-5 rounded-xl font-bold text-xl transition ${
+                processing || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              {processing ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-6 w-6" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Processing...
+                </span>
+              ) : selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total ? (
+                `Enter at least $${total.toFixed(2)}`
+              ) : (
+                `✓ Complete Payment - $${total.toFixed(2)}`
+              )}
+            </button>
           </div>
         </div>
       )}
@@ -976,38 +1062,44 @@ export function POSPage() {
 
       {/* Order Success Modal */}
       {showSuccessModal && lastOrder && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-center">
-            <div className="text-6xl mb-4">✅</div>
-            <h2 className="text-2xl font-bold text-green-600 mb-2">Order Complete!</h2>
-            
-            <div className="bg-gray-50 rounded-lg p-4 mb-4">
-              <p className="text-3xl font-bold text-gray-800 mb-2">{lastOrder.orderNumber}</p>
-              <p className="text-gray-600">{lastOrder.customerName}</p>
+        <div className="fixed inset-0 bg-green-600 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 text-center">
+            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg className="w-12 h-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+              </svg>
             </div>
             
-            <div className="space-y-2 mb-4">
-              <div className="flex justify-between text-lg">
-                <span className="text-gray-600">Total:</span>
+            <h2 className="text-3xl font-bold text-gray-800 mb-2">Order Complete!</h2>
+            
+            <div className="bg-gray-100 rounded-xl p-6 my-6">
+              <p className="text-sm text-gray-500 uppercase tracking-wide mb-1">Order Number</p>
+              <p className="text-3xl font-bold text-gray-800 font-mono">{lastOrder.orderNumber}</p>
+              <p className="text-gray-600 mt-2">{lastOrder.customerName}</p>
+            </div>
+            
+            <div className="space-y-3 mb-6">
+              <div className="flex justify-between items-center text-lg">
+                <span className="text-gray-500">Total</span>
                 <span className="font-bold text-gray-800">${lastOrder.total.toFixed(2)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Payment:</span>
-                <span className="font-medium text-gray-800 capitalize">{lastOrder.paymentMethod}</span>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-500">Payment</span>
+                <span className="font-medium text-gray-800">{lastOrder.paymentMethod}</span>
               </div>
-              {lastOrder.paymentMethod === 'cash' && lastOrder.change > 0 && (
-                <div className="flex justify-between text-lg pt-2 border-t">
-                  <span className="text-gray-600">Change Due:</span>
-                  <span className="font-bold text-green-600">${lastOrder.change.toFixed(2)}</span>
+              {lastOrder.change > 0 && (
+                <div className="flex justify-between items-center text-xl pt-3 border-t-2 border-dashed">
+                  <span className="text-gray-700 font-medium">Change Due</span>
+                  <span className="font-bold text-green-600 text-2xl">${lastOrder.change.toFixed(2)}</span>
                 </div>
               )}
             </div>
             
             <button
               onClick={() => { setShowSuccessModal(false); setLastOrder(null) }}
-              className="w-full py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition"
+              className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold text-lg hover:bg-blue-700 transition"
             >
-              New Order
+              Start New Order
             </button>
           </div>
         </div>
