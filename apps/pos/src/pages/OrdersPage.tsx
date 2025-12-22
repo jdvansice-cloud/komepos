@@ -243,7 +243,6 @@ export function OrdersPage() {
                 >
                   📋 Details
                 </button>
-                </button>
               </div>
             </div>
           ))}
