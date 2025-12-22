@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { getCompanyTimezone, formatDateShort } from '../lib/timezone'
 
 interface Order {
   id: string
@@ -16,8 +17,14 @@ export function OrdersPage() {
   const { profile } = useAuth()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
+  const [timezone, setTimezone] = useState('America/Panama')
 
   useEffect(() => {
+    async function init() {
+      const tz = await getCompanyTimezone()
+      setTimezone(tz)
+    }
+    init()
     if (profile) fetchOrders()
     else setLoading(false)
   }, [profile])
@@ -89,7 +96,7 @@ export function OrdersPage() {
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <p className="font-bold text-gray-800">{order.order_number}</p>
-                  <p className="text-sm text-gray-500">{new Date(order.created_at).toLocaleDateString()}</p>
+                  <p className="text-sm text-gray-500">{formatDateShort(order.created_at, timezone)}</p>
                 </div>
                 <span className={`px-3 py-1 rounded-full text-xs font-semibold capitalize ${statusColors[order.status] || 'bg-gray-100'}`}>
                   {order.status}

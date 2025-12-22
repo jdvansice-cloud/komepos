@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { getCompanyTimezone } from '../lib/timezone'
+import { getCompanyTimezone, formatTime, formatDateShort, formatDateTime, getNowISO } from '../lib/timezone'
 
 interface Shift {
   id: string
@@ -181,7 +181,7 @@ export function ShiftsPage() {
       const { error } = await supabase
         .from('shifts')
         .update({
-          ended_at: new Date().toISOString(),
+          ended_at: getNowISO(),
           ending_cash: ending,
           expected_cash: expectedCash,
           cash_variance: variance,
@@ -229,40 +229,6 @@ export function ShiftsPage() {
     }
   }
 
-  function formatTime(date: string) {
-    try {
-      return new Date(date).toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        timeZone: timezone
-      })
-    } catch {
-      return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }
-  }
-
-  function formatDate(date: string) {
-    try {
-      return new Date(date).toLocaleDateString('en-US', { timeZone: timezone })
-    } catch {
-      return new Date(date).toLocaleDateString()
-    }
-  }
-
-  function formatDateTime(date: string) {
-    try {
-      return new Date(date).toLocaleString('en-US', { 
-        timeZone: timezone,
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    } catch {
-      return new Date(date).toLocaleString()
-    }
-  }
-
   if (loading) {
     return (
       <div className="p-6">
@@ -289,7 +255,7 @@ export function ShiftsPage() {
                 <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
                 <h2 className="text-lg font-semibold text-green-800">Shift Active</h2>
               </div>
-              <p className="text-green-700">Started at {formatTime(currentShift.started_at)} • {currentShift.location?.name}</p>
+              <p className="text-green-700">Started at {formatTime(currentShift.started_at, timezone)} • {currentShift.location?.name}</p>
               <p className="text-green-600 text-sm mt-1">Starting Cash: ${currentShift.starting_cash.toFixed(2)}</p>
             </div>
             <div className="flex gap-2">
@@ -361,7 +327,7 @@ export function ShiftsPage() {
                   <tbody className="divide-y">
                     {transactions.slice(0, 5).map(t => (
                       <tr key={t.id}>
-                        <td className="px-4 py-2 text-gray-600">{formatTime(t.created_at)}</td>
+                        <td className="px-4 py-2 text-gray-600">{formatTime(t.created_at, timezone)}</td>
                         <td className="px-4 py-2">
                           <span className={`px-2 py-0.5 rounded text-xs ${
                             t.type === 'cash_in' || t.type === 'sale' ? 'bg-green-100 text-green-700' :
@@ -420,11 +386,11 @@ export function ShiftsPage() {
             <tbody className="divide-y">
               {recentShifts.map(shift => (
                 <tr key={shift.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-gray-800">{formatDate(shift.started_at)}</td>
+                  <td className="px-6 py-4 text-gray-800">{formatDateShort(shift.started_at, timezone)}</td>
                   <td className="px-6 py-4 text-gray-600">{shift.user?.full_name}</td>
                   <td className="px-6 py-4 text-gray-600">{shift.location?.name}</td>
                   <td className="px-6 py-4 text-gray-600">
-                    {formatTime(shift.started_at)} - {shift.ended_at ? formatTime(shift.ended_at) : '-'}
+                    {formatTime(shift.started_at, timezone)} - {shift.ended_at ? formatTime(shift.ended_at, timezone) : '-'}
                   </td>
                   <td className="px-6 py-4 text-gray-800">${shift.starting_cash.toFixed(2)}</td>
                   <td className="px-6 py-4 text-gray-800">${shift.ending_cash?.toFixed(2) || '-'}</td>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { getTodayInTimezone, getPromoStatus } from '../lib/timezone'
+import { getTodayInTimezone, formatDateShort, getCompanyTimezone } from '../lib/timezone'
 
 type PromoDiscountType = 'item_percentage' | 'item_fixed' | 'order_percentage' | 'order_fixed' | 'free_delivery'
 
@@ -24,6 +24,7 @@ export function ActivePromosPage() {
   const [promos, setPromos] = useState<Promo[]>([])
   const [loading, setLoading] = useState(true)
   const [todayStr, setTodayStr] = useState('')
+  const [timezone, setTimezone] = useState('America/Panama')
 
   useEffect(() => {
     fetchActivePromos()
@@ -32,7 +33,9 @@ export function ActivePromosPage() {
   async function fetchActivePromos() {
     setLoading(true)
     try {
-      // Get today's date in company timezone
+      // Get timezone and today's date in company timezone
+      const tz = await getCompanyTimezone()
+      setTimezone(tz)
       const today = await getTodayInTimezone()
       setTodayStr(today)
       
@@ -154,6 +157,9 @@ export function ActivePromosPage() {
             'All active promotions across locations'
           )}
         </p>
+        {todayStr && (
+          <p className="text-xs text-gray-400 mt-1">📅 System date: {todayStr}</p>
+        )}
       </div>
 
       {promos.length === 0 ? (
@@ -218,7 +224,7 @@ export function ActivePromosPage() {
                       <div className="flex items-center gap-2">
                         <span>📅</span>
                         <span>
-                          Ends: <strong>{new Date(promo.end_date).toLocaleDateString()}</strong>
+                          Ends: <strong>{formatDateShort(promo.end_date, timezone)}</strong>
                           {daysRemaining !== null && daysRemaining <= 7 && (
                             <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${daysRemaining <= 2 ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
                               {daysRemaining === 0 ? 'Ends today!' : daysRemaining === 1 ? '1 day left' : `${daysRemaining} days left`}

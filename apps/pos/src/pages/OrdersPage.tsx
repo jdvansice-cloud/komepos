@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { getCompanyTimezone } from '../lib/timezone'
+import { getCompanyTimezone, formatDateTime } from '../lib/timezone'
 
 interface Order {
   id: string
@@ -28,20 +28,6 @@ export function OrdersPage() {
     init()
     fetchOrders()
   }, [])
-
-  function formatDateTime(date: string) {
-    try {
-      return new Date(date).toLocaleString('en-US', { 
-        timeZone: timezone,
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    } catch {
-      return new Date(date).toLocaleString()
-    }
-  }
 
   async function fetchOrders() {
     try {
@@ -131,7 +117,7 @@ export function OrdersPage() {
                   {order.customer && (
                     <p className="text-gray-600 mt-1">{order.customer.full_name} • {order.customer.phone}</p>
                   )}
-                  <p className="text-sm text-gray-400 mt-1">{formatDateTime(order.created_at)}</p>
+                  <p className="text-sm text-gray-400 mt-1">{formatDateTime(order.created_at, timezone)}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-2xl font-bold text-gray-800">${order.total?.toFixed(2)}</p>

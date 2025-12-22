@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { getCompanyTimezone, getDateInTimezone } from '../lib/timezone'
+import { getCompanyTimezone, getDateInTimezone, formatDateShort, formatTime, formatDateTime } from '../lib/timezone'
 
 type ReportTab = 'overview' | 'shifts' | 'discounts' | 'refunds'
 
@@ -194,40 +194,6 @@ export function ReportsPage() {
     }
   }
 
-  function formatDate(date: string) {
-    try {
-      return new Date(date).toLocaleDateString('en-US', { timeZone: timezone })
-    } catch {
-      return new Date(date).toLocaleDateString()
-    }
-  }
-
-  function formatTime(date: string) {
-    try {
-      return new Date(date).toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        timeZone: timezone
-      })
-    } catch {
-      return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }
-  }
-
-  function formatDateTime(date: string) {
-    try {
-      return new Date(date).toLocaleString('en-US', { 
-        timeZone: timezone,
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    } catch {
-      return new Date(date).toLocaleString()
-    }
-  }
-
   const tabs = [
     { id: 'overview' as ReportTab, label: 'Overview', icon: '📊' },
     { id: 'shifts' as ReportTab, label: 'Shift Reports', icon: '💰' },
@@ -373,11 +339,11 @@ export function ReportsPage() {
               <tbody className="divide-y">
                 {shiftReports.map(shift => (
                   <tr key={shift.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-4 text-gray-800">{formatDate(shift.started_at)}</td>
+                    <td className="px-4 py-4 text-gray-800">{formatDateShort(shift.started_at, timezone)}</td>
                     <td className="px-4 py-4 text-gray-600">{shift.user_name}</td>
                     <td className="px-4 py-4 text-gray-600">{shift.location_name}</td>
                     <td className="px-4 py-4 text-gray-500 text-sm">
-                      {formatTime(shift.started_at)} - {shift.ended_at ? formatTime(shift.ended_at) : '-'}
+                      {formatTime(shift.started_at, timezone)} - {shift.ended_at ? formatTime(shift.ended_at, timezone) : '-'}
                     </td>
                     <td className="px-4 py-4 text-gray-800">{shift.order_count}</td>
                     <td className="px-4 py-4 text-green-600 font-medium">${shift.total_sales.toFixed(2)}</td>

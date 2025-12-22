@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { getTodayInTimezone, clearTimezoneCache } from '../lib/timezone'
+import { getTodayInTimezone, clearTimezoneCache, formatDateShort, getCompanyTimezone } from '../lib/timezone'
 
 type TabType = 'company' | 'locations' | 'delivery' | 'users' | 'categories' | 'products' | 'promos'
 type UserRole = 'admin' | 'supervisor' | 'operator'
@@ -1124,9 +1124,12 @@ function PromosSettings() {
   const [promoProductCounts, setPromoProductCounts] = useState<Record<string, number>>({})
   const [promoLocationCounts, setPromoLocationCounts] = useState<Record<string, number>>({})
   const [todayStr, setTodayStr] = useState('')
+  const [timezone, setTimezone] = useState('America/Panama')
 
   useEffect(() => { 
     async function init() {
+      const tz = await getCompanyTimezone()
+      setTimezone(tz)
       const today = await getTodayInTimezone()
       setTodayStr(today)
       fetchPromos()
@@ -1196,7 +1199,9 @@ function PromosSettings() {
       setSelectedLocations(promoLocs?.map(pl => pl.location_id) || [])
     } else { 
       setEditing(null)
-      setFormData({ name: '', description: '', discount_type: 'order_percentage', discount_value: 10, start_date: new Date().toISOString().split('T')[0], end_date: '', is_active: true })
+      // Use todayStr from company timezone for default start date
+      const defaultStartDate = todayStr || new Date().toISOString().split('T')[0]
+      setFormData({ name: '', description: '', discount_type: 'order_percentage', discount_value: 10, start_date: defaultStartDate, end_date: '', is_active: true })
       setSelectedProducts([])
       setSelectedLocations(allLocations.map(l => l.id)) // Default to all locations
     }
@@ -1300,7 +1305,10 @@ function PromosSettings() {
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-semibold text-gray-800">Promotions & Discounts</h2>
+        <div>
+          <h2 className="text-lg font-semibold text-gray-800">Promotions & Discounts</h2>
+          {todayStr && <p className="text-xs text-gray-400">📅 System date: {todayStr}</p>}
+        </div>
         <button onClick={() => openModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ Add Promo</button>
       </div>
 
@@ -1336,7 +1344,7 @@ function PromosSettings() {
                       <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded">
                         📍 {locationCount === allLocations.length ? 'All locations' : `${locationCount} location${locationCount !== 1 ? 's' : ''}`}
                       </span>
-                      <span className="text-xs text-gray-400">{new Date(promo.start_date).toLocaleDateString()}{promo.end_date && ` - ${new Date(promo.end_date).toLocaleDateString()}`}</span>
+                      <span className="text-xs text-gray-400">{formatDateShort(promo.start_date, timezone)}{promo.end_date && ` - ${formatDateShort(promo.end_date, timezone)}`}</span>
                     </div>
                   </div>
                   <div className="flex gap-2">

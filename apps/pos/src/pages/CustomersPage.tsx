@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { getCompanyTimezone, formatDateShort } from '../lib/timezone'
 
 interface Customer { id: string; full_name: string; email: string; phone: string; created_at: string }
 
@@ -7,8 +8,16 @@ export function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [timezone, setTimezone] = useState('America/Panama')
 
-  useEffect(() => { fetchCustomers() }, [])
+  useEffect(() => { 
+    async function init() {
+      const tz = await getCompanyTimezone()
+      setTimezone(tz)
+      fetchCustomers()
+    }
+    init()
+  }, [])
 
   async function fetchCustomers() {
     try {
@@ -45,7 +54,7 @@ export function CustomersPage() {
                     </div>
                   </td>
                   <td className="px-6 py-4"><p className="text-gray-800">{customer.email || '-'}</p><p className="text-sm text-gray-500">{customer.phone || '-'}</p></td>
-                  <td className="px-6 py-4 text-gray-500">{new Date(customer.created_at).toLocaleDateString()}</td>
+                  <td className="px-6 py-4 text-gray-500">{formatDateShort(customer.created_at, timezone)}</td>
                 </tr>
               ))}
             </tbody>
