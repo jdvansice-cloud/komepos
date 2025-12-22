@@ -44,8 +44,8 @@ export function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
   const [timezone, setTimezone] = useState('America/Panama')
-  const [debugInfo, setDebugInfo] = useState<string>('')
   
   // Order detail modal
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null)
@@ -62,26 +62,17 @@ export function OrdersPage() {
 
   async function fetchOrders() {
     try {
-      setDebugInfo('Fetching orders...')
-      
-      // First, try a simple query without joins
+      // Simple query without joins
       const { data: simpleData, error: simpleError } = await supabase
         .from('orders')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(50)
+        .limit(100)
       
-      console.log('Simple query result:', { data: simpleData, error: simpleError })
-      setDebugInfo(`Simple query: ${simpleData?.length || 0} orders, error: ${simpleError?.message || 'none'}`)
+      if (simpleError) throw simpleError
       
-      if (simpleError) {
-        setDebugInfo(`ERROR: ${simpleError.message} (${simpleError.code})`)
-        throw simpleError
-      }
-      
-      // If simple query works, use the data directly
+      // If we have orders, get customer info separately
       if (simpleData && simpleData.length > 0) {
-        // Now try to get customer info separately
         const ordersWithCustomers = await Promise.all(simpleData.map(async (order) => {
           let customer = null
           let location = null
@@ -118,14 +109,11 @@ export function OrdersPage() {
         }))
         
         setOrders(ordersWithCustomers)
-        setDebugInfo(`Loaded ${ordersWithCustomers.length} orders successfully`)
       } else {
         setOrders([])
-        setDebugInfo('No orders found in database')
       }
     } catch (error: any) {
       console.error('Error fetching orders:', error)
-      setDebugInfo(`CATCH ERROR: ${error?.message || JSON.stringify(error)}`)
     } finally {
       setLoading(false)
     }
@@ -134,14 +122,46 @@ export function OrdersPage() {
   async function fetchOrderDetails(orderId: string) {
     setLoadingDetail(true)
     try {
-      // Fetch order with all details
+      // Fetch order without joins first
       const { data: order, error: orderError } = await supabase
         .from('orders')
-        .select('*, customer:customers(full_name, phone, email), location:locations(name), user:users(full_name)')
+        .select('*')
         .eq('id', orderId)
         .single()
 
       if (orderError) throw orderError
+
+      // Fetch related data separately
+      let customer = null
+      let location = null
+      let user = null
+
+      if (order.customer_id) {
+        const { data: custData } = await supabase
+          .from('customers')
+          .select('full_name, phone, email')
+          .eq('id', order.customer_id)
+          .single()
+        customer = custData
+      }
+
+      if (order.location_id) {
+        const { data: locData } = await supabase
+          .from('locations')
+          .select('name')
+          .eq('id', order.location_id)
+          .single()
+        location = locData
+      }
+
+      if (order.user_id) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', order.user_id)
+          .single()
+        user = userData
+      }
 
       // Fetch order items
       const { data: items, error: itemsError } = await supabase
@@ -152,7 +172,7 @@ export function OrdersPage() {
 
       if (itemsError) throw itemsError
 
-      setSelectedOrder({ ...order, items: items || [] })
+      setSelectedOrder({ ...order, customer, location, user, items: items || [] })
     } catch (error) {
       console.error('Error fetching order details:', error)
       alert('Error loading order details')
@@ -197,22 +217,54 @@ export function OrdersPage() {
     whatsapp: '💬 WhatsApp',
   }
 
-  const filteredOrders = statusFilter === 'all' ? orders : orders.filter(o => o.status === statusFilter)
-  
-  // Debug log
-  console.log('Orders state:', orders.length, 'Filtered:', filteredOrders.length, 'Filter:', statusFilter)
+  // Filter by status and search
+  const filteredOrders = orders.filter(order => {
+    // Status filter
+    const matchesStatus = statusFilter === 'all' || order.status === statusFilter
+    
+    // Search filter
+    if (!searchQuery.trim()) return matchesStatus
+    
+    const query = searchQuery.toLowerCase()
+    const matchesSearch = 
+      order.order_number?.toLowerCase().includes(query) ||
+      order.customer?.full_name?.toLowerCase().includes(query) ||
+      order.customer?.phone?.toLowerCase().includes(query) ||
+      order.customer?.email?.toLowerCase().includes(query)
+    
+    return matchesStatus && matchesSearch
+  })
 
   return (
     <div className="p-6">
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-800">Orders</h1>
         <p className="text-gray-600">Manage customer orders</p>
-        {/* Debug info */}
-        <div className="mt-2 p-2 bg-yellow-100 border border-yellow-300 rounded text-sm">
-          <strong>Debug:</strong> {debugInfo} | Orders: {orders.length} | Filtered: {filteredOrders.length} | Filter: {statusFilter} | Loading: {loading ? 'yes' : 'no'}
+      </div>
+
+      {/* Search Bar */}
+      <div className="mb-4">
+        <div className="relative max-w-md">
+          <input
+            type="text"
+            placeholder="Search by order #, customer name, phone, or email..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">🔍</span>
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              ✕
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Status Filters */}
       <div className="flex gap-2 mb-6 flex-wrap">
         {['all', 'pending', 'preparing', 'ready', 'delivered', 'completed', 'cancelled'].map(status => (
           <button
@@ -231,30 +283,52 @@ export function OrdersPage() {
         <div className="flex justify-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
         </div>
-      ) : orders.length === 0 ? (
+      ) : filteredOrders.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-8 text-center">
-          <p className="text-gray-500 text-lg">No orders yet</p>
-          <p className="text-gray-400">Orders will appear here when customers place them</p>
+          <p className="text-gray-500 text-lg">
+            {searchQuery ? 'No orders match your search' : 'No orders yet'}
+          </p>
+          <p className="text-gray-400">
+            {searchQuery ? 'Try a different search term' : 'Orders will appear here when customers place them'}
+          </p>
         </div>
       ) : (
         <div className="grid gap-4">
           {filteredOrders.map(order => (
             <div key={order.id} className="bg-white rounded-lg shadow p-6">
               <div className="flex justify-between items-start">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-bold text-gray-800">#{order.order_number}</h3>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${statusColors[order.status] || 'bg-gray-100'}`}>
+                <div className="flex-1">
+                  {/* Customer Name - Prominent */}
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="text-xl">👤</span>
+                    <h3 className="text-lg font-bold text-gray-800">
+                      {order.customer?.full_name || 'Walk-in Customer'}
+                    </h3>
+                  </div>
+                  
+                  {/* Order info row */}
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className="text-sm font-mono text-gray-500">#{order.order_number}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[order.status] || 'bg-gray-100'}`}>
                       {order.status?.replace('_', ' ')}
                     </span>
-                    <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">
                       {orderTypeLabels[order.order_type] || order.order_type}
                     </span>
+                    {order.payment_status === 'refunded' && (
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-600 font-medium">
+                        Refunded
+                      </span>
+                    )}
                   </div>
-                  {order.customer && (
-                    <p className="text-gray-600 mt-1">{order.customer.full_name} • {order.customer.phone}</p>
-                  )}
-                  <p className="text-sm text-gray-400 mt-1">{formatDateTime(order.created_at, timezone)}</p>
+                  
+                  {/* Contact & location info */}
+                  <div className="text-sm text-gray-500 space-y-0.5">
+                    {order.customer?.phone && (
+                      <p>📞 {order.customer.phone} {order.customer.email && `• ${order.customer.email}`}</p>
+                    )}
+                    <p>📍 {order.location?.name || 'Unknown location'} • {formatDateTime(order.created_at, timezone)}</p>
+                  </div>
                 </div>
                 <div className="text-right">
                   <p className="text-2xl font-bold text-gray-800">${order.total?.toFixed(2)}</p>
