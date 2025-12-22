@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { getTodayInTimezone, clearTimezoneCache, formatDateShort, getCompanyTimezone } from '../lib/timezone'
 
-type TabType = 'company' | 'locations' | 'delivery' | 'users' | 'categories' | 'products' | 'promos'
+type TabType = 'company' | 'locations' | 'delivery' | 'users' | 'categories' | 'products' | 'promos' | 'payments'
 type UserRole = 'admin' | 'supervisor' | 'operator'
 type PromoDiscountType = 'item_percentage' | 'item_fixed' | 'order_percentage' | 'order_fixed' | 'free_delivery'
 
@@ -14,6 +14,7 @@ interface DeliveryZone { id: string; name: string; delivery_fee: number; is_acti
 interface Category { id: string; name: string; description: string; image_url: string; sort_order: number; is_active: boolean }
 interface Product { id: string; name: string; description: string; base_price: number; image_url: string; is_taxable: boolean; is_active: boolean; has_options: boolean; category_id: string; category?: { name: string } }
 interface Promo { id: string; name: string; description: string; discount_type: PromoDiscountType; discount_value: number; start_date: string; end_date: string; is_active: boolean }
+interface PaymentMethod { id: string; name: string; code: string; icon: string; is_active: boolean; sort_order: number; requires_change: boolean }
 
 // Common timezones for the Americas
 const TIMEZONES = [
@@ -42,6 +43,7 @@ export function SettingsPage() {
     { id: 'company' as TabType, label: 'Company', icon: '🏢' },
     { id: 'locations' as TabType, label: 'Locations', icon: '📍' },
     { id: 'delivery' as TabType, label: 'Delivery Zones', icon: '🚚' },
+    { id: 'payments' as TabType, label: 'Payment Methods', icon: '💳' },
     { id: 'categories' as TabType, label: 'Categories', icon: '📁' },
     { id: 'products' as TabType, label: 'Products', icon: '🍔' },
     { id: 'promos' as TabType, label: 'Promotions', icon: '🎉' },
@@ -79,6 +81,7 @@ export function SettingsPage() {
       {activeTab === 'company' && <CompanySettings />}
       {activeTab === 'locations' && <LocationsSettings />}
       {activeTab === 'delivery' && <DeliverySettings />}
+      {activeTab === 'payments' && <PaymentMethodsSettings />}
       {activeTab === 'categories' && <CategoriesSettings />}
       {activeTab === 'products' && <ProductsSettings />}
       {activeTab === 'promos' && <PromosSettings />}
@@ -562,6 +565,254 @@ function DeliverySettings() {
                 <span className="text-sm">Active</span>
               </label>
               <div className="flex justify-end gap-2 pt-4">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">{editing ? 'Save' : 'Add'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Payment Methods Settings Component
+const PAYMENT_ICONS = ['💵', '💳', '📱', '🏦', '💰', '🔄', '📲', '💲']
+
+function PaymentMethodsSettings() {
+  const [methods, setMethods] = useState<PaymentMethod[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [editing, setEditing] = useState<PaymentMethod | null>(null)
+  const [formData, setFormData] = useState({ name: '', code: '', icon: '💵', is_active: true, requires_change: false, sort_order: 0 })
+
+  useEffect(() => { fetchMethods() }, [])
+
+  async function fetchMethods() {
+    try {
+      const { data, error } = await supabase
+        .from('payment_methods')
+        .select('*')
+        .order('sort_order')
+      
+      if (error) throw error
+      setMethods(data || [])
+    } catch (error) {
+      console.error('Error fetching payment methods:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function openModal(method?: PaymentMethod) {
+    if (method) {
+      setEditing(method)
+      setFormData({ 
+        name: method.name, 
+        code: method.code, 
+        icon: method.icon, 
+        is_active: method.is_active, 
+        requires_change: method.requires_change,
+        sort_order: method.sort_order 
+      })
+    } else {
+      setEditing(null)
+      setFormData({ name: '', code: '', icon: '💵', is_active: true, requires_change: false, sort_order: methods.length })
+    }
+    setShowModal(true)
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    
+    // Generate code from name if not provided
+    const code = formData.code || formData.name.toLowerCase().replace(/\s+/g, '_')
+    
+    try {
+      if (editing) {
+        const { error } = await supabase
+          .from('payment_methods')
+          .update({ 
+            name: formData.name, 
+            code,
+            icon: formData.icon, 
+            is_active: formData.is_active,
+            requires_change: formData.requires_change,
+            sort_order: formData.sort_order
+          })
+          .eq('id', editing.id)
+        if (error) throw error
+      } else {
+        // Get company_id
+        const { data: company } = await supabase.from('companies').select('id').single()
+        if (!company) throw new Error('No company found')
+        
+        const { error } = await supabase
+          .from('payment_methods')
+          .insert({ 
+            company_id: company.id,
+            name: formData.name, 
+            code,
+            icon: formData.icon, 
+            is_active: formData.is_active,
+            requires_change: formData.requires_change,
+            sort_order: formData.sort_order
+          })
+        if (error) throw error
+      }
+      setShowModal(false)
+      fetchMethods()
+    } catch (error: any) {
+      console.error('Error saving:', error)
+      alert(`Error: ${error?.message || 'Failed to save payment method'}`)
+    }
+  }
+
+  async function toggleActive(method: PaymentMethod) {
+    try {
+      const { error } = await supabase
+        .from('payment_methods')
+        .update({ is_active: !method.is_active })
+        .eq('id', method.id)
+      if (error) throw error
+      fetchMethods()
+    } catch (error) {
+      console.error('Error toggling:', error)
+    }
+  }
+
+  async function deleteMethod(method: PaymentMethod) {
+    if (!confirm(`Delete "${method.name}" payment method?`)) return
+    try {
+      const { error } = await supabase
+        .from('payment_methods')
+        .delete()
+        .eq('id', method.id)
+      if (error) throw error
+      fetchMethods()
+    } catch (error) {
+      console.error('Error deleting:', error)
+      alert('Cannot delete - payment method may be in use')
+    }
+  }
+
+  if (loading) return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-800">Payment Methods</h2>
+          <p className="text-sm text-gray-500">Configure accepted payment options for the POS</p>
+        </div>
+        <button onClick={() => openModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ Add Method</button>
+      </div>
+
+      {methods.length === 0 ? (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
+          <p className="text-yellow-800 font-medium mb-2">No payment methods configured</p>
+          <p className="text-yellow-600 text-sm mb-4">Add payment methods to enable checkout in the POS</p>
+          <button onClick={() => openModal()} className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700">Add First Method</button>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {methods.map(method => (
+            <div key={method.id} className={`bg-white rounded-lg shadow p-4 flex items-center justify-between ${!method.is_active ? 'opacity-60' : ''}`}>
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{method.icon}</span>
+                <div>
+                  <p className="font-medium text-gray-800">{method.name}</p>
+                  <p className="text-xs text-gray-400">Code: {method.code} {method.requires_change && '• Requires change calculation'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-1 rounded-full text-xs font-medium ${method.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {method.is_active ? 'Active' : 'Inactive'}
+                </span>
+                <button onClick={() => openModal(method)} className="text-blue-600 hover:text-blue-800 px-2">Edit</button>
+                <button onClick={() => toggleActive(method)} className="text-gray-600 hover:text-gray-800 px-2">
+                  {method.is_active ? 'Disable' : 'Enable'}
+                </button>
+                <button onClick={() => deleteMethod(method)} className="text-red-600 hover:text-red-800 px-2">Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold mb-4">{editing ? 'Edit' : 'Add'} Payment Method</h2>
+            <form onSubmit={handleSubmit}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="e.g., Cash, Credit Card, Yappy"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Code (optional)</label>
+                <input
+                  type="text"
+                  value={formData.code}
+                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toLowerCase().replace(/\s+/g, '_') })}
+                  placeholder="Auto-generated from name"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+                <p className="text-xs text-gray-400 mt-1">Used internally for database storage</p>
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Icon</label>
+                <div className="flex flex-wrap gap-2">
+                  {PAYMENT_ICONS.map(icon => (
+                    <button
+                      key={icon}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, icon })}
+                      className={`w-10 h-10 text-xl rounded-lg border-2 transition ${
+                        formData.icon === icon ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {icon}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="mb-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.requires_change}
+                    onChange={(e) => setFormData({ ...formData, requires_change: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span className="text-sm text-gray-700">Requires change calculation (like cash)</span>
+                </label>
+              </div>
+              
+              <div className="mb-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.is_active}
+                    onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span className="text-sm text-gray-700">Active (available at checkout)</span>
+                </label>
+              </div>
+              
+              <div className="flex gap-2 justify-end">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
                 <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">{editing ? 'Save' : 'Add'}</button>
               </div>

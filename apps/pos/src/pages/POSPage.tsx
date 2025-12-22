@@ -9,6 +9,7 @@ interface CartItem { product: Product; quantity: number; notes: string; promoDis
 interface Customer { id: string; full_name: string; phone: string; email: string }
 interface DeliveryZone { id: string; name: string; delivery_fee: number }
 interface ItemPromo { id: string; name: string; discount_type: 'item_percentage' | 'item_fixed'; discount_value: number; product_ids: string[] }
+interface PaymentMethod { id: string; name: string; code: string; icon: string; is_active: boolean; requires_change: boolean }
 
 export function POSPage() {
   const { profile, activeLocation } = useAuth()
@@ -38,10 +39,15 @@ export function POSPage() {
   const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent')
   const [discountValue, setDiscountValue] = useState('')
   
-  // Payment
+  // Payment methods
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod | null>(null)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer'>('cash')
   const [cashReceived, setCashReceived] = useState('')
+  
+  // Success modal
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [lastOrder, setLastOrder] = useState<{ orderNumber: string; customerName: string; total: number; paymentMethod: string; change: number } | null>(null)
   
   // Tax rate
   const [taxRate, setTaxRate] = useState(0.07)
@@ -133,6 +139,26 @@ export function POSPage() {
           .eq('is_active', true)
           .order('name')
         setDeliveryZones(allZones || [])
+      }
+      
+      // Fetch payment methods
+      const { data: paymentMethodsData } = await supabase
+        .from('payment_methods')
+        .select('*')
+        .eq('is_active', true)
+        .order('sort_order')
+      
+      if (paymentMethodsData && paymentMethodsData.length > 0) {
+        setPaymentMethods(paymentMethodsData)
+        setSelectedPaymentMethod(paymentMethodsData[0]) // Default to first method
+      } else {
+        // Fallback to default methods if none configured
+        const defaultMethods: PaymentMethod[] = [
+          { id: 'default-cash', name: 'Cash', code: 'cash', icon: '💵', is_active: true, requires_change: true },
+          { id: 'default-card', name: 'Card', code: 'card', icon: '💳', is_active: true, requires_change: false },
+        ]
+        setPaymentMethods(defaultMethods)
+        setSelectedPaymentMethod(defaultMethods[0])
       }
     } catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
@@ -278,6 +304,12 @@ export function POSPage() {
       return
     }
     
+    // Ensure payment method is selected
+    if (!selectedPaymentMethod) {
+      alert('Please select a payment method')
+      return
+    }
+    
     setProcessing(true)
     
     try {
@@ -306,7 +338,7 @@ export function POSPage() {
           delivery_fee: deliveryCharge,
           tax_amount: tax,
           total,
-          payment_method: paymentMethod,
+          payment_method: selectedPaymentMethod.code,
           payment_status: 'paid',
           internal_notes: notes || null,
         })
@@ -333,11 +365,18 @@ export function POSPage() {
 
       if (itemsError) throw itemsError
 
-      // Success - show receipt
-      const customerName = selectedCustomer.type === 'walk-in' ? 'Walk-in' : selectedCustomer.customer?.full_name
-      alert(`✅ Order ${order.order_number} completed!\n\nCustomer: ${customerName}\nTotal: $${total.toFixed(2)}\nPayment: ${paymentMethod.toUpperCase()}${paymentMethod === 'cash' && change > 0 ? `\nChange: $${change.toFixed(2)}` : ''}`)
+      // Success - store order info and show modal
+      const customerName = selectedCustomer.type === 'walk-in' ? 'Walk-in' : selectedCustomer.customer?.full_name || 'Customer'
+      setLastOrder({
+        orderNumber: order.order_number,
+        customerName,
+        total,
+        paymentMethod: selectedPaymentMethod.name,
+        change: selectedPaymentMethod.requires_change ? change : 0
+      })
+      setShowSuccessModal(true)
       
-      // Reset
+      // Reset cart and payment
       setCart([])
       setSelectedCustomer(null)
       setSelectedZone(null)
@@ -345,9 +384,9 @@ export function POSPage() {
       setShowPaymentModal(false)
       setCashReceived('')
       
-    } catch (error) {
-      console.error('Error:', error)
-      alert('Error processing order')
+    } catch (error: any) {
+      console.error('Order error details:', error)
+      alert(`Error processing order: ${error?.message || 'Unknown error'}`)
     } finally {
       setProcessing(false)
     }
@@ -785,24 +824,25 @@ export function POSPage() {
 
             <div className="mb-6">
               <p className="text-sm font-medium text-gray-700 mb-2">Payment Method</p>
-              <div className="grid grid-cols-3 gap-2">
-                {(['cash', 'card', 'transfer'] as const).map(method => (
+              <div className={`grid gap-2 ${paymentMethods.length <= 2 ? 'grid-cols-2' : paymentMethods.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3'}`}>
+                {paymentMethods.map(method => (
                   <button
-                    key={method}
-                    onClick={() => setPaymentMethod(method)}
-                    className={`py-3 rounded-lg font-medium transition ${
-                      paymentMethod === method
+                    key={method.id}
+                    onClick={() => { setSelectedPaymentMethod(method); setCashReceived('') }}
+                    className={`py-3 rounded-lg font-medium transition flex items-center justify-center gap-2 ${
+                      selectedPaymentMethod?.id === method.id
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
                   >
-                    {method === 'cash' ? '💵 Cash' : method === 'card' ? '💳 Card' : '📱 Transfer'}
+                    <span>{method.icon}</span>
+                    <span>{method.name}</span>
                   </button>
                 ))}
               </div>
             </div>
 
-            {paymentMethod === 'cash' && (
+            {selectedPaymentMethod?.requires_change && (
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Cash Received</label>
                 <input
@@ -814,8 +854,45 @@ export function POSPage() {
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 text-xl text-center"
                   autoFocus
                 />
+                
+                {/* Quick Cash Denominations */}
+                <div className="grid grid-cols-4 gap-2 mt-3">
+                  {[1, 5, 10, 20].map(amount => (
+                    <button
+                      key={amount}
+                      onClick={() => setCashReceived(prev => (parseFloat(prev || '0') + amount).toString())}
+                      className="py-2 bg-green-100 text-green-700 rounded-lg font-medium hover:bg-green-200 transition"
+                    >
+                      +${amount}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  {[50, 100].map(amount => (
+                    <button
+                      key={amount}
+                      onClick={() => setCashReceived(prev => (parseFloat(prev || '0') + amount).toString())}
+                      className="py-2 bg-green-100 text-green-700 rounded-lg font-medium hover:bg-green-200 transition"
+                    >
+                      +${amount}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setCashReceived(total.toFixed(2))}
+                    className="py-2 bg-blue-100 text-blue-700 rounded-lg font-medium hover:bg-blue-200 transition"
+                  >
+                    Exact
+                  </button>
+                </div>
+                <button
+                  onClick={() => setCashReceived('')}
+                  className="w-full mt-2 py-2 bg-gray-100 text-gray-600 rounded-lg font-medium hover:bg-gray-200 transition"
+                >
+                  Clear
+                </button>
+                
                 {change > 0 && (
-                  <p className="text-center mt-2 text-lg">
+                  <p className="text-center mt-3 text-lg">
                     Change: <span className="font-bold text-green-600">${change.toFixed(2)}</span>
                   </p>
                 )}
@@ -831,7 +908,7 @@ export function POSPage() {
               </button>
               <button
                 onClick={processPayment}
-                disabled={processing || (paymentMethod === 'cash' && parseFloat(cashReceived || '0') < total)}
+                disabled={processing || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)}
                 className="py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {processing ? 'Processing...' : 'Complete Payment'}
@@ -893,6 +970,45 @@ export function POSPage() {
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Order Success Modal */}
+      {showSuccessModal && lastOrder && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-center">
+            <div className="text-6xl mb-4">✅</div>
+            <h2 className="text-2xl font-bold text-green-600 mb-2">Order Complete!</h2>
+            
+            <div className="bg-gray-50 rounded-lg p-4 mb-4">
+              <p className="text-3xl font-bold text-gray-800 mb-2">{lastOrder.orderNumber}</p>
+              <p className="text-gray-600">{lastOrder.customerName}</p>
+            </div>
+            
+            <div className="space-y-2 mb-4">
+              <div className="flex justify-between text-lg">
+                <span className="text-gray-600">Total:</span>
+                <span className="font-bold text-gray-800">${lastOrder.total.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Payment:</span>
+                <span className="font-medium text-gray-800 capitalize">{lastOrder.paymentMethod}</span>
+              </div>
+              {lastOrder.paymentMethod === 'cash' && lastOrder.change > 0 && (
+                <div className="flex justify-between text-lg pt-2 border-t">
+                  <span className="text-gray-600">Change Due:</span>
+                  <span className="font-bold text-green-600">${lastOrder.change.toFixed(2)}</span>
+                </div>
+              )}
+            </div>
+            
+            <button
+              onClick={() => { setShowSuccessModal(false); setLastOrder(null) }}
+              className="w-full py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition"
+            >
+              New Order
+            </button>
           </div>
         </div>
       )}
