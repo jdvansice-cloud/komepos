@@ -38,6 +38,11 @@ export function POSPage() {
   // Discount
   const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent')
   const [discountValue, setDiscountValue] = useState('')
+  const [showDiscountSection, setShowDiscountSection] = useState(false)
+  
+  // Order notes
+  const [orderNotes, setOrderNotes] = useState('')
+  const [showNotesSection, setShowNotesSection] = useState(false)
   
   // Payment methods
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
@@ -341,6 +346,7 @@ export function POSPage() {
           payment_method: selectedPaymentMethod.code,
           payment_status: 'paid',
           internal_notes: notes || null,
+          customer_notes: orderNotes || null,
         })
         .select()
         .single()
@@ -381,6 +387,9 @@ export function POSPage() {
       setSelectedCustomer(null)
       setSelectedZone(null)
       setDiscountValue('')
+      setOrderNotes('')
+      setShowDiscountSection(false)
+      setShowNotesSection(false)
       setShowPaymentModal(false)
       setCashReceived('')
       
@@ -644,12 +653,12 @@ export function POSPage() {
           )}
         </div>
 
-        {/* Delivery Zone & Discount */}
+        {/* Collapsible Options */}
         {cart.length > 0 && (
-          <div className="border-t p-4 space-y-3">
+          <div className="border-t">
             {/* Delivery Zone Selector */}
             {orderType === 'delivery' && (
-              <div>
+              <div className="p-3 border-b">
                 <label className="block text-xs font-medium text-gray-600 mb-1">Delivery Zone</label>
                 {selectedZone ? (
                   <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
@@ -675,43 +684,99 @@ export function POSPage() {
               </div>
             )}
             
-            {/* Manual Discount */}
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Discount</label>
-              <div className="flex gap-2">
-                <div className="flex border border-gray-300 rounded-lg overflow-hidden">
-                  <button
-                    onClick={() => setDiscountType('percent')}
-                    className={`px-3 py-2 text-sm ${discountType === 'percent' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
-                  >
-                    %
-                  </button>
-                  <button
-                    onClick={() => setDiscountType('fixed')}
-                    className={`px-3 py-2 text-sm ${discountType === 'fixed' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
-                  >
-                    $
-                  </button>
+            {/* Collapsible Discount Section */}
+            <div className="border-b">
+              <button
+                onClick={() => setShowDiscountSection(!showDiscountSection)}
+                className="w-full px-3 py-2 flex items-center justify-between text-sm text-gray-600 hover:bg-gray-50 transition"
+              >
+                <span className="flex items-center gap-2">
+                  <span>🏷️</span>
+                  <span>Add Discount</span>
+                  {discountValue && (
+                    <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-xs font-medium">
+                      {discountType === 'percent' ? `${discountValue}%` : `$${discountValue}`}
+                    </span>
+                  )}
+                </span>
+                <span className={`transition-transform ${showDiscountSection ? 'rotate-180' : ''}`}>▼</span>
+              </button>
+              {showDiscountSection && (
+                <div className="px-3 pb-3">
+                  <div className="flex gap-2">
+                    <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+                      <button
+                        onClick={() => setDiscountType('percent')}
+                        className={`px-3 py-2 text-sm font-medium ${discountType === 'percent' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+                      >
+                        %
+                      </button>
+                      <button
+                        onClick={() => setDiscountType('fixed')}
+                        className={`px-3 py-2 text-sm font-medium ${discountType === 'fixed' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+                      >
+                        $
+                      </button>
+                    </div>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max={discountType === 'percent' ? '100' : itemsSubtotal.toString()}
+                      value={discountValue}
+                      onChange={(e) => setDiscountValue(e.target.value)}
+                      placeholder={discountType === 'percent' ? '0%' : '$0.00'}
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    {discountValue && (
+                      <button
+                        onClick={() => { setDiscountValue(''); setShowDiscountSection(false) }}
+                        className="px-2 text-gray-400 hover:text-red-600"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max={discountType === 'percent' ? '100' : itemsSubtotal.toString()}
-                  value={discountValue}
-                  onChange={(e) => setDiscountValue(e.target.value)}
-                  placeholder={discountType === 'percent' ? '0%' : '$0.00'}
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
-                {discountValue && (
-                  <button
-                    onClick={() => setDiscountValue('')}
-                    className="px-2 text-gray-400 hover:text-gray-600"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
+              )}
+            </div>
+            
+            {/* Collapsible Notes Section */}
+            <div className="border-b">
+              <button
+                onClick={() => setShowNotesSection(!showNotesSection)}
+                className="w-full px-3 py-2 flex items-center justify-between text-sm text-gray-600 hover:bg-gray-50 transition"
+              >
+                <span className="flex items-center gap-2">
+                  <span>📝</span>
+                  <span>Add Notes</span>
+                  {orderNotes && (
+                    <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-medium truncate max-w-[120px]">
+                      {orderNotes}
+                    </span>
+                  )}
+                </span>
+                <span className={`transition-transform ${showNotesSection ? 'rotate-180' : ''}`}>▼</span>
+              </button>
+              {showNotesSection && (
+                <div className="px-3 pb-3">
+                  <textarea
+                    value={orderNotes}
+                    onChange={(e) => setOrderNotes(e.target.value)}
+                    placeholder="Special instructions, delivery notes..."
+                    rows={2}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none"
+                  />
+                  {orderNotes && (
+                    <button
+                      onClick={() => { setOrderNotes(''); setShowNotesSection(false) }}
+                      className="mt-1 text-xs text-gray-400 hover:text-red-600"
+                    >
+                      Clear notes
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -811,195 +876,155 @@ export function POSPage() {
         </div>
       )}
 
-      {/* Payment Modal - Full Screen POS Style */}
+      {/* Payment Modal - Clean Modal Style */}
       {showPaymentModal && (
-        <div className="fixed inset-0 bg-gray-900 z-50 flex">
-          {/* Left Panel - Payment Methods */}
-          <div className="w-80 bg-gray-800 p-4 flex flex-col">
-            <h2 className="text-white text-lg font-bold mb-4">Payment Method</h2>
-            <div className="flex-1 space-y-2">
-              {paymentMethods.map(method => (
-                <button
-                  key={method.id}
-                  onClick={() => { setSelectedPaymentMethod(method); setCashReceived('') }}
-                  className={`w-full p-4 rounded-lg font-medium transition flex items-center gap-3 ${
-                    selectedPaymentMethod?.id === method.id
-                      ? 'bg-blue-600 text-white ring-2 ring-blue-400'
-                      : 'bg-gray-700 text-gray-200 hover:bg-gray-600'
-                  }`}
-                >
-                  <span className="text-2xl">{method.icon}</span>
-                  <span className="text-lg">{method.name}</span>
-                </button>
-              ))}
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-xl font-bold text-gray-800">Payment</h2>
+              <button
+                onClick={() => { setShowPaymentModal(false); setCashReceived('') }}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+              >
+                ×
+              </button>
             </div>
-            <button
-              onClick={() => { setShowPaymentModal(false); setCashReceived('') }}
-              className="mt-4 w-full py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition"
-            >
-              ✕ Cancel
-            </button>
-          </div>
-
-          {/* Right Panel - Amount Entry */}
-          <div className="flex-1 bg-gray-100 p-6 flex flex-col">
-            {/* Amount Display */}
-            <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <p className="text-sm text-gray-500 uppercase tracking-wide">Total Due</p>
-                  <p className="text-3xl font-bold text-gray-800">${total.toFixed(2)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 uppercase tracking-wide">Tendered</p>
-                  <p className="text-3xl font-bold text-blue-600">
-                    ${selectedPaymentMethod?.requires_change ? (parseFloat(cashReceived || '0')).toFixed(2) : total.toFixed(2)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 uppercase tracking-wide">Change</p>
-                  <p className={`text-3xl font-bold ${change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    ${selectedPaymentMethod?.requires_change ? Math.max(0, change).toFixed(2) : '0.00'}
-                  </p>
-                </div>
+            
+            <div className="p-6">
+              {/* Total Amount */}
+              <div className="text-center mb-6">
+                <p className="text-sm text-gray-500 mb-1">Total to Pay</p>
+                <p className="text-5xl font-bold text-gray-800">${total.toFixed(2)}</p>
               </div>
-            </div>
-
-            {selectedPaymentMethod?.requires_change ? (
-              <>
-                {/* Quick Tender Buttons */}
-                <div className="mb-4">
-                  <p className="text-sm font-medium text-gray-600 mb-2">Quick Tender</p>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[
-                      Math.ceil(total), // Round up to nearest dollar
-                      Math.ceil(total / 5) * 5, // Round up to nearest $5
-                      Math.ceil(total / 10) * 10, // Round up to nearest $10
-                      Math.ceil(total / 20) * 20, // Round up to nearest $20
-                    ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 4).map(amount => (
-                      <button
-                        key={amount}
-                        onClick={() => setCashReceived(amount.toString())}
-                        className={`py-3 rounded-lg font-bold text-lg transition ${
-                          parseFloat(cashReceived || '0') === amount
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-white text-gray-800 hover:bg-blue-50 border-2 border-gray-200'
-                        }`}
-                      >
-                        ${amount}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-4 gap-2 mt-2">
-                    {[50, 100].map(amount => (
-                      <button
-                        key={amount}
-                        onClick={() => setCashReceived(amount.toString())}
-                        className={`py-3 rounded-lg font-bold text-lg transition ${
-                          parseFloat(cashReceived || '0') === amount
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-white text-gray-800 hover:bg-blue-50 border-2 border-gray-200'
-                        }`}
-                      >
-                        ${amount}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => setCashReceived(total.toFixed(2))}
-                      className="py-3 bg-green-100 text-green-700 rounded-lg font-bold text-lg hover:bg-green-200 transition border-2 border-green-300"
-                    >
-                      Exact
-                    </button>
-                    <button
-                      onClick={() => setCashReceived('')}
-                      className="py-3 bg-gray-200 text-gray-600 rounded-lg font-bold text-lg hover:bg-gray-300 transition"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-
-                {/* Numpad */}
-                <div className="flex-1 flex flex-col">
-                  <p className="text-sm font-medium text-gray-600 mb-2">Enter Amount</p>
-                  <div className="bg-white rounded-xl shadow p-4 flex-1 flex flex-col">
-                    <input
-                      type="text"
-                      value={cashReceived}
-                      readOnly
-                      placeholder="0.00"
-                      className="w-full text-right text-4xl font-bold text-gray-800 mb-4 border-b-2 border-gray-200 pb-2 outline-none"
-                    />
-                    <div className="grid grid-cols-3 gap-2 flex-1">
-                      {['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '⌫'].map(key => (
+              
+              {/* Primary Payment Methods (Cash & Card) */}
+              {(() => {
+                const primaryMethods = paymentMethods.filter(m => m.code === 'cash' || m.code === 'card')
+                const secondaryMethods = paymentMethods.filter(m => m.code !== 'cash' && m.code !== 'card')
+                
+                return (
+                  <>
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      {primaryMethods.map(method => (
                         <button
-                          key={key}
-                          onClick={() => {
-                            if (key === '⌫') {
-                              setCashReceived(prev => prev.slice(0, -1))
-                            } else if (key === '.') {
-                              if (!cashReceived.includes('.')) {
-                                setCashReceived(prev => prev + '.')
-                              }
-                            } else {
-                              setCashReceived(prev => {
-                                const newVal = prev + key
-                                // Limit to 2 decimal places
-                                if (newVal.includes('.') && newVal.split('.')[1]?.length > 2) return prev
-                                return newVal
-                              })
-                            }
-                          }}
-                          className={`rounded-lg font-bold text-2xl transition ${
-                            key === '⌫' 
-                              ? 'bg-red-100 text-red-600 hover:bg-red-200' 
-                              : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                          key={method.id}
+                          onClick={() => { setSelectedPaymentMethod(method); if (!method.requires_change) setCashReceived('') }}
+                          className={`p-6 rounded-xl border-2 transition flex flex-col items-center gap-2 ${
+                            selectedPaymentMethod?.id === method.id
+                              ? 'border-blue-500 bg-blue-50 text-blue-700'
+                              : 'border-gray-200 hover:border-gray-300 text-gray-700'
                           }`}
-                          style={{ minHeight: '60px' }}
                         >
-                          {key}
+                          <span className="text-3xl">{method.icon}</span>
+                          <span className="font-medium">{method.name}</span>
                         </button>
                       ))}
                     </div>
+                    
+                    {/* Secondary Payment Methods */}
+                    {secondaryMethods.length > 0 && (
+                      <div className="grid grid-cols-3 gap-2 mb-6">
+                        {secondaryMethods.map(method => (
+                          <button
+                            key={method.id}
+                            onClick={() => { setSelectedPaymentMethod(method); if (!method.requires_change) setCashReceived('') }}
+                            className={`py-3 px-4 rounded-xl border transition text-sm font-medium ${
+                              selectedPaymentMethod?.id === method.id
+                                ? 'border-blue-500 bg-blue-50 text-blue-700'
+                                : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                            }`}
+                          >
+                            {method.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+              
+              {/* Change Calculator - Only for cash/requires_change methods */}
+              {selectedPaymentMethod?.requires_change && (
+                <div className="bg-gray-50 rounded-xl p-4 mb-6">
+                  <p className="text-sm font-medium text-gray-600 mb-3">Change Calculator</p>
+                  
+                  {/* Quick Denomination Buttons */}
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    {[1, 2, 5, 10, 20, 50].map(amount => (
+                      <button
+                        key={amount}
+                        onClick={() => setCashReceived(prev => (parseFloat(prev || '0') + amount).toString())}
+                        className="py-3 bg-white border border-gray-200 rounded-lg font-medium text-gray-700 hover:bg-gray-100 transition"
+                      >
+                        ${amount}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  {/* Amount Summary */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-500">Amount to pay</span>
+                      <span className="font-medium text-gray-800">${total.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500 text-sm">Customer cash</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={cashReceived}
+                          onChange={(e) => setCashReceived(e.target.value)}
+                          placeholder="0.00"
+                          className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-right font-medium"
+                        />
+                        {cashReceived && (
+                          <button
+                            onClick={() => setCashReceived('')}
+                            className="text-gray-400 hover:text-red-500"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center pt-2 border-t">
+                      <span className="font-medium text-gray-700">Change</span>
+                      <span className={`text-2xl font-bold ${change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        ${Math.max(0, change).toFixed(2)}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </>
-            ) : (
-              /* Non-cash payment - just show confirmation */
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="text-6xl mb-4">{selectedPaymentMethod?.icon}</div>
-                  <p className="text-xl text-gray-600 mb-2">Ready to process</p>
-                  <p className="text-4xl font-bold text-blue-600">{selectedPaymentMethod?.name}</p>
-                  <p className="text-gray-500 mt-4">Click "Complete Payment" to finalize</p>
-                </div>
-              </div>
-            )}
-
-            {/* Complete Button */}
-            <button
-              onClick={processPayment}
-              disabled={processing || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)}
-              className={`mt-4 w-full py-5 rounded-xl font-bold text-xl transition ${
-                processing || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-green-600 text-white hover:bg-green-700'
-              }`}
-            >
-              {processing ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin h-6 w-6" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Processing...
-                </span>
-              ) : selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total ? (
-                `Enter at least $${total.toFixed(2)}`
-              ) : (
-                `✓ Complete Payment - $${total.toFixed(2)}`
               )}
-            </button>
+              
+              {/* Process Button */}
+              <button
+                onClick={processPayment}
+                disabled={processing || !selectedPaymentMethod || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)}
+                className={`w-full py-4 rounded-xl font-bold text-lg transition flex items-center justify-center gap-2 ${
+                  processing || !selectedPaymentMethod || (selectedPaymentMethod?.requires_change && parseFloat(cashReceived || '0') < total)
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                }`}
+              >
+                {processing ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <span>✓</span>
+                    <span>Process</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
