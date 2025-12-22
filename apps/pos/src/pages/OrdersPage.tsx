@@ -45,6 +45,7 @@ export function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
   const [timezone, setTimezone] = useState('America/Panama')
+  const [debugInfo, setDebugInfo] = useState<string>('')
   
   // Order detail modal
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null)
@@ -61,20 +62,70 @@ export function OrdersPage() {
 
   async function fetchOrders() {
     try {
-      const { data, error } = await supabase
+      setDebugInfo('Fetching orders...')
+      
+      // First, try a simple query without joins
+      const { data: simpleData, error: simpleError } = await supabase
         .from('orders')
-        .select('*, customer:customers(full_name, phone, email), location:locations(name), user:users(full_name)')
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(50)
-
-      if (error) {
-        console.error('Orders fetch error:', error)
-        throw error
+      
+      console.log('Simple query result:', { data: simpleData, error: simpleError })
+      setDebugInfo(`Simple query: ${simpleData?.length || 0} orders, error: ${simpleError?.message || 'none'}`)
+      
+      if (simpleError) {
+        setDebugInfo(`ERROR: ${simpleError.message} (${simpleError.code})`)
+        throw simpleError
       }
-      console.log('Orders fetched:', data?.length || 0)
-      setOrders(data || [])
-    } catch (error) {
+      
+      // If simple query works, use the data directly
+      if (simpleData && simpleData.length > 0) {
+        // Now try to get customer info separately
+        const ordersWithCustomers = await Promise.all(simpleData.map(async (order) => {
+          let customer = null
+          let location = null
+          let user = null
+          
+          if (order.customer_id) {
+            const { data: custData } = await supabase
+              .from('customers')
+              .select('full_name, phone, email')
+              .eq('id', order.customer_id)
+              .single()
+            customer = custData
+          }
+          
+          if (order.location_id) {
+            const { data: locData } = await supabase
+              .from('locations')
+              .select('name')
+              .eq('id', order.location_id)
+              .single()
+            location = locData
+          }
+          
+          if (order.user_id) {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('full_name')
+              .eq('id', order.user_id)
+              .single()
+            user = userData
+          }
+          
+          return { ...order, customer, location, user }
+        }))
+        
+        setOrders(ordersWithCustomers)
+        setDebugInfo(`Loaded ${ordersWithCustomers.length} orders successfully`)
+      } else {
+        setOrders([])
+        setDebugInfo('No orders found in database')
+      }
+    } catch (error: any) {
       console.error('Error fetching orders:', error)
+      setDebugInfo(`CATCH ERROR: ${error?.message || JSON.stringify(error)}`)
     } finally {
       setLoading(false)
     }
@@ -147,12 +198,19 @@ export function OrdersPage() {
   }
 
   const filteredOrders = statusFilter === 'all' ? orders : orders.filter(o => o.status === statusFilter)
+  
+  // Debug log
+  console.log('Orders state:', orders.length, 'Filtered:', filteredOrders.length, 'Filter:', statusFilter)
 
   return (
     <div className="p-6">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-800">Orders</h1>
         <p className="text-gray-600">Manage customer orders</p>
+        {/* Debug info */}
+        <div className="mt-2 p-2 bg-yellow-100 border border-yellow-300 rounded text-sm">
+          <strong>Debug:</strong> {debugInfo} | Orders: {orders.length} | Filtered: {filteredOrders.length} | Filter: {statusFilter} | Loading: {loading ? 'yes' : 'no'}
+        </div>
       </div>
 
       <div className="flex gap-2 mb-6 flex-wrap">
