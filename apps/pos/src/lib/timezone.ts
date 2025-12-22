@@ -4,6 +4,7 @@ import { supabase } from './supabase'
 let cachedTimezone: string | null = null
 let lastFetch: number = 0
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+const DEFAULT_TIMEZONE = 'America/Panama'
 
 /**
  * Get the company's configured timezone
@@ -22,12 +23,13 @@ export async function getCompanyTimezone(): Promise<string> {
       .select('timezone')
       .single()
     
-    cachedTimezone = data?.timezone || 'America/Panama'
+    const tz = data?.timezone || DEFAULT_TIMEZONE
+    cachedTimezone = tz
     lastFetch = now
-    return cachedTimezone
+    return tz
   } catch (error) {
     console.error('Error fetching timezone:', error)
-    return 'America/Panama' // Default fallback
+    return DEFAULT_TIMEZONE
   }
 }
 
