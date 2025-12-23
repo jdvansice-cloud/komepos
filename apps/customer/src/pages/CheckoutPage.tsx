@@ -3,12 +3,13 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
+import { haptics } from '../lib/haptics'
 
 export function CheckoutPage() {
   const { items, total, clearCart } = useCart()
   const { profile } = useAuth()
   const navigate = useNavigate()
-  const [orderType, setOrderType] = useState<'delivery' | 'pickup'>('delivery')
+  const [orderType, setOrderType] = useState<'delivery' | 'takeout'>('delivery')
   const [address, setAddress] = useState('')
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
@@ -46,19 +47,20 @@ export function CheckoutPage() {
         location_id: location?.id,
         customer_id: profile.id,
         status: 'pending',
-        order_type: orderType === 'pickup' ? 'takeout' : 'delivery',
+        order_type: orderType,
         subtotal: subtotal,
         tax_amount: tax,
         delivery_fee: deliveryFee,
         discount_amount: 0,
         total: grandTotal,
         customer_notes: notes || null,
+        delivery_notes: orderType === 'delivery' ? address : null,
         payment_status: 'pending',
       }).select().single()
 
       if (orderError) throw orderError
 
-      // Insert order items
+      // Insert order items with options and addons
       const orderItems = items.map(item => ({
         order_id: order.id,
         product_id: item.product_id,
@@ -67,9 +69,13 @@ export function CheckoutPage() {
         unit_price: item.price,
         line_total: item.price * item.quantity,
         is_taxable: true,
+        options_json: item.options && item.options.length > 0 ? item.options : null,
+        addons_json: item.addons && item.addons.length > 0 ? item.addons : null,
+        item_notes: item.specialInstructions || null,
       }))
 
-      await supabase.from('order_items').insert(orderItems)
+      const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
+      if (itemsError) throw itemsError
 
       clearCart()
       navigate('/order-success', { state: { orderNumber } })
@@ -87,28 +93,28 @@ export function CheckoutPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-32">
-      <header className="bg-red-600 text-white p-4 sticky top-0 z-10">
-        <Link to="/cart" className="text-xl font-bold">← Checkout</Link>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="bg-red-600 text-white p-4 flex-shrink-0 header-safe">
+        <Link to="/cart" className="text-xl font-bold btn-press">← Checkout</Link>
       </header>
 
-      <div className="p-4 space-y-6">
+      <div className="flex-1 overflow-y-auto scroll-momentum p-4 space-y-4">
         {/* Order Type */}
         <div className="bg-white rounded-lg shadow p-4">
           <h2 className="font-semibold text-gray-800 mb-3">Order Type</h2>
-          <div className="flex gap-4">
+          <div className="flex gap-3">
             <button
-              onClick={() => setOrderType('delivery')}
-              className={`flex-1 py-3 rounded-lg font-semibold transition ${
+              onClick={() => { haptics.tap(); setOrderType('delivery') }}
+              className={`flex-1 py-3 rounded-lg font-semibold transition btn-press ${
                 orderType === 'delivery' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'
               }`}
             >
               🚗 Delivery
             </button>
             <button
-              onClick={() => setOrderType('pickup')}
-              className={`flex-1 py-3 rounded-lg font-semibold transition ${
-                orderType === 'pickup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'
+              onClick={() => { haptics.tap(); setOrderType('takeout') }}
+              className={`flex-1 py-3 rounded-lg font-semibold transition btn-press ${
+                orderType === 'takeout' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'
               }`}
             >
               🏪 Pickup
@@ -145,11 +151,29 @@ export function CheckoutPage() {
         {/* Order Summary */}
         <div className="bg-white rounded-lg shadow p-4">
           <h2 className="font-semibold text-gray-800 mb-3">Order Summary</h2>
-          <div className="space-y-2 text-sm">
+          <div className="space-y-3">
             {items.map(item => (
-              <div key={item.id} className="flex justify-between">
-                <span>{item.quantity}x {item.name}</span>
-                <span>${((item.price || 0) * item.quantity).toFixed(2)}</span>
+              <div key={item.id} className="pb-3 border-b last:border-b-0 last:pb-0">
+                <div className="flex justify-between">
+                  <span className="font-medium text-gray-800">{item.quantity}x {item.name}</span>
+                  <span className="font-medium text-gray-800">${((item.price || 0) * item.quantity).toFixed(2)}</span>
+                </div>
+                {/* Options */}
+                {item.options && item.options.length > 0 && (
+                  <div className="mt-1 pl-4">
+                    {item.options.map((opt, i) => (
+                      <p key={i} className="text-xs text-gray-500">{opt.group_name}: {opt.option_name}</p>
+                    ))}
+                  </div>
+                )}
+                {/* Addons */}
+                {item.addons && item.addons.length > 0 && (
+                  <div className="mt-1 pl-4">
+                    {item.addons.map((addon, i) => (
+                      <p key={i} className="text-xs text-green-600">+ {addon.quantity}x {addon.name}</p>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -174,16 +198,29 @@ export function CheckoutPage() {
             </div>
           </div>
         </div>
+        
+        {/* Spacer for footer */}
+        <div className="h-24"></div>
       </div>
 
       {/* Place Order Footer */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 shadow-lg bottom-nav">
         <button
-          onClick={handlePlaceOrder}
+          onClick={() => { haptics.tap(); handlePlaceOrder() }}
           disabled={loading}
-          className="w-full bg-red-600 text-white py-4 rounded-lg font-bold text-lg hover:bg-red-700 transition disabled:opacity-50"
+          className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg active:bg-red-700 transition disabled:opacity-50 flex items-center justify-center gap-2 btn-press"
         >
-          {loading ? 'Placing Order...' : `Place Order - $${grandTotal.toFixed(2)}`}
+          {loading ? (
+            <>
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+              <span>Placing Order...</span>
+            </>
+          ) : (
+            <>
+              <span>Place Order</span>
+              <span className="bg-white/20 px-3 py-1 rounded-lg">${grandTotal.toFixed(2)}</span>
+            </>
+          )}
         </button>
       </div>
     </div>
