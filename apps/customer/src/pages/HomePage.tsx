@@ -3,15 +3,27 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
+import { ProductDetailModal } from '../components/ProductDetailModal'
 
-interface Category { id: string; name: string; image_url: string }
-interface Product { id: string; name: string; description: string; base_price: number; image_url: string; category_id: string; is_active: boolean }
+interface Category { id: string; name: string; image_url: string; sort_order: number }
+interface Product { 
+  id: string
+  name: string
+  description: string
+  base_price: number
+  image_url: string
+  category_id: string
+  is_active: boolean
+  has_options: boolean
+  sort_order: number
+}
 
 export function HomePage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
-  const { addItem, itemCount } = useCart()
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const { addItem, addSimpleItem, itemCount } = useCart()
   const { profile } = useAuth()
 
   useEffect(() => { fetchData() }, [])
@@ -20,7 +32,7 @@ export function HomePage() {
     try {
       const [catRes, prodRes] = await Promise.all([
         supabase.from('categories').select('*').eq('is_active', true).order('sort_order'),
-        supabase.from('products').select('*').eq('is_active', true).order('name'),
+        supabase.from('products').select('*').eq('is_active', true).order('sort_order'),
       ])
       setCategories(catRes.data || [])
       setProducts(prodRes.data || [])
@@ -32,6 +44,25 @@ export function HomePage() {
     ...cat,
     products: products.filter(p => p.category_id === cat.id)
   }))
+
+  function handleProductClick(product: Product) {
+    // Always open modal - it handles both simple and complex products
+    setSelectedProduct(product)
+  }
+
+  function handleQuickAdd(e: React.MouseEvent, product: Product) {
+    e.stopPropagation()
+    if (product.has_options) {
+      setSelectedProduct(product)
+    } else {
+      addSimpleItem({ 
+        id: product.id, 
+        name: product.name, 
+        price: product.base_price, 
+        image_url: product.image_url 
+      })
+    }
+  }
 
   if (loading) {
     return (
@@ -67,33 +98,70 @@ export function HomePage() {
         <p className="opacity-90">Fresh food delivered to your door</p>
       </div>
 
+      {/* Category Quick Nav */}
+      {categories.length > 3 && (
+        <div className="sticky top-[72px] z-10 bg-white border-b shadow-sm">
+          <div className="flex overflow-x-auto scrollbar-hide gap-2 p-3">
+            {categories.map(cat => (
+              <a
+                key={cat.id}
+                href={`#category-${cat.id}`}
+                className="flex-shrink-0 px-4 py-2 bg-gray-100 rounded-full text-sm font-medium text-gray-700 hover:bg-red-100 hover:text-red-700 transition"
+              >
+                {cat.name}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Menu */}
       <div className="p-4">
         {groupedProducts.map(category => (
-          <div key={category.id} className="mb-8">
+          <div key={category.id} id={`category-${category.id}`} className="mb-8 scroll-mt-32">
             <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
               {category.name}
             </h2>
             <div className="grid grid-cols-1 gap-4">
               {category.products.map(product => (
-                <div key={product.id} className="bg-white rounded-lg shadow overflow-hidden flex">
+                <div 
+                  key={product.id} 
+                  onClick={() => handleProductClick(product)}
+                  className="bg-white rounded-lg shadow overflow-hidden flex cursor-pointer hover:shadow-md transition group"
+                >
                   {product.image_url ? (
-                    <img src={product.image_url} alt={product.name} className="w-24 h-24 object-cover" />
+                    <img 
+                      src={product.image_url} 
+                      alt={product.name} 
+                      className="w-24 h-24 object-cover group-hover:scale-105 transition-transform" 
+                    />
                   ) : (
-                    <div className="w-24 h-24 bg-gray-200 flex items-center justify-center text-2xl">🍽️</div>
+                    <div className="w-24 h-24 bg-gray-200 flex items-center justify-center text-2xl flex-shrink-0">🍽️</div>
                   )}
-                  <div className="flex-1 p-3 flex flex-col justify-between">
+                  <div className="flex-1 p-3 flex flex-col justify-between min-w-0">
                     <div>
-                      <h3 className="font-semibold text-gray-800">{product.name}</h3>
+                      <h3 className="font-semibold text-gray-800 truncate">{product.name}</h3>
                       <p className="text-sm text-gray-500 line-clamp-2">{product.description}</p>
                     </div>
                     <div className="flex justify-between items-center mt-2">
-                      <span className="font-bold text-red-600">${(product.base_price || 0).toFixed(2)}</span>
+                      <div>
+                        <span className="font-bold text-red-600">${(product.base_price || 0).toFixed(2)}</span>
+                        {product.has_options && (
+                          <span className="text-xs text-gray-400 ml-1">+options</span>
+                        )}
+                      </div>
                       <button
-                        onClick={() => addItem({ id: product.id, name: product.name, price: product.base_price || 0, image_url: product.image_url })}
-                        className="bg-red-600 text-white px-4 py-1 rounded-full text-sm hover:bg-red-700 transition"
+                        onClick={(e) => handleQuickAdd(e, product)}
+                        className="bg-red-600 text-white px-4 py-1.5 rounded-full text-sm font-medium hover:bg-red-700 transition flex items-center gap-1"
                       >
-                        + Add
+                        {product.has_options ? (
+                          <>
+                            <span>Select</span>
+                            <span className="text-xs">▼</span>
+                          </>
+                        ) : (
+                          '+ Add'
+                        )}
                       </button>
                     </div>
                   </div>
@@ -102,6 +170,13 @@ export function HomePage() {
             </div>
           </div>
         ))}
+
+        {categories.length === 0 && (
+          <div className="text-center py-12">
+            <span className="text-4xl mb-4 block">🍽️</span>
+            <p className="text-gray-500">No menu items available</p>
+          </div>
+        )}
       </div>
 
       {/* Bottom Navigation */}
@@ -126,6 +201,15 @@ export function HomePage() {
           <span className="text-xs">Account</span>
         </Link>
       </nav>
+
+      {/* Product Detail Modal */}
+      {selectedProduct && (
+        <ProductDetailModal
+          product={selectedProduct}
+          onClose={() => setSelectedProduct(null)}
+          onAddToCart={addItem}
+        />
+      )}
     </div>
   )
 }
