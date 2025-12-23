@@ -64,11 +64,12 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
   const [addonCategories, setAddonCategories] = useState<AddonCategory[]>([])
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string[]>>({})
   const [selectedAddons, setSelectedAddons] = useState<Record<string, number>>({})
-  const [expandedAddons, setExpandedAddons] = useState<Record<string, boolean>>({})
+  const [expandedAddonId, setExpandedAddonId] = useState<string | null>(null)
   const [quantity, setQuantity] = useState(1)
   const [specialInstructions, setSpecialInstructions] = useState('')
   const [loading, setLoading] = useState(true)
   const [errors, setErrors] = useState<string[]>([])
+  const [showImageZoom, setShowImageZoom] = useState(false)
 
   useEffect(() => {
     fetchProductDetails()
@@ -175,10 +176,8 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
   }
 
   function toggleAddonCategory(categoryId: string) {
-    setExpandedAddons(prev => ({
-      ...prev,
-      [categoryId]: !prev[categoryId]
-    }))
+    // Only one can be open at a time - toggle off if clicking the same one
+    setExpandedAddonId(prev => prev === categoryId ? null : categoryId)
   }
 
   // Helper to count selected addons in a category
@@ -266,219 +265,223 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
   const total = calculateTotal()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-black/50 transition-opacity"
-        onClick={onClose}
-      />
-      
-      {/* Modal */}
-      <div className="relative bg-white w-full max-w-lg max-h-[90vh] rounded-t-2xl sm:rounded-2xl overflow-hidden flex flex-col animate-slide-up">
-        {/* Product Image Header */}
-        <div className="relative h-48 sm:h-56 flex-shrink-0">
-          {product.image_url ? (
-            <img 
-              src={product.image_url} 
-              alt={product.name}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center">
-              <span className="text-6xl">🍽️</span>
-            </div>
-          )}
-          {/* Close button */}
+    <div className="fixed inset-0 z-50 bg-white flex flex-col">
+      {/* Product Image Header - 50% height with cropped view */}
+      <div className="relative h-[35vh] flex-shrink-0 overflow-hidden">
+        {product.image_url ? (
+          <img 
+            src={product.image_url} 
+            alt={product.name}
+            className="w-full h-[50vh] object-cover"
+          />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center">
+            <span className="text-6xl">🍽️</span>
+          </div>
+        )}
+        {/* Back button */}
+        <button
+          onClick={onClose}
+          className="absolute top-3 left-3 w-9 h-9 bg-white/90 backdrop-blur rounded-full flex items-center justify-center shadow-lg hover:bg-white transition"
+        >
+          <span className="text-gray-600 text-lg">←</span>
+        </button>
+        {/* Zoom button */}
+        {product.image_url && (
           <button
-            onClick={onClose}
-            className="absolute top-4 right-4 w-8 h-8 bg-white/90 backdrop-blur rounded-full flex items-center justify-center shadow-lg hover:bg-white transition"
+            onClick={() => setShowImageZoom(true)}
+            className="absolute top-3 right-3 w-9 h-9 bg-white/90 backdrop-blur rounded-full flex items-center justify-center shadow-lg hover:bg-white transition"
           >
-            <span className="text-gray-600 text-xl leading-none">&times;</span>
+            <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+            </svg>
           </button>
+        )}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Product Info - more compact */}
+        <div className="px-4 py-3 border-b">
+          <h2 className="text-lg font-bold text-gray-800">{product.name}</h2>
+          <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">{product.description}</p>
+          <p className="text-red-600 font-bold text-lg mt-1">${product.base_price.toFixed(2)}</p>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          {/* Product Info */}
-          <div className="p-4 border-b">
-            <h2 className="text-xl font-bold text-gray-800">{product.name}</h2>
-            <p className="text-gray-500 mt-1">{product.description}</p>
-            <p className="text-red-600 font-bold text-lg mt-2">${product.base_price.toFixed(2)}</p>
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-red-600"></div>
           </div>
+        ) : (
+          <>
+            {/* Validation Errors */}
+            {errors.length > 0 && (
+              <div className="mx-4 mt-3 p-2.5 bg-red-50 border border-red-200 rounded-lg">
+                {errors.map((error, i) => (
+                  <p key={i} className="text-red-600 text-sm">{error}</p>
+                ))}
+              </div>
+            )}
 
-          {loading ? (
-            <div className="flex justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600"></div>
-            </div>
-          ) : (
-            <>
-              {/* Validation Errors */}
-              {errors.length > 0 && (
-                <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  {errors.map((error, i) => (
-                    <p key={i} className="text-red-600 text-sm">{error}</p>
-                  ))}
-                </div>
-              )}
-
-              {/* Option Groups */}
-              {optionGroups.map(group => (
-                <div key={group.id} className="p-4 border-b">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="font-semibold text-gray-800">{group.name}</h3>
-                      <p className="text-xs text-gray-500">
-                        {group.selection_type === 'single' 
-                          ? 'Choose 1' 
-                          : `Choose ${group.min_selections}-${group.max_selections}`}
-                        {group.is_required && <span className="text-red-500 ml-1">• Required</span>}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    {group.options.filter(o => o.is_available).map(option => {
-                      const isSelected = (selectedOptions[group.id] || []).includes(option.id)
-                      return (
-                        <button
-                          key={option.id}
-                          onClick={() => handleOptionChange(group.id, option.id, group.selection_type)}
-                          className={`w-full flex items-center justify-between p-3 rounded-lg border transition ${
-                            isSelected 
-                              ? 'border-red-500 bg-red-50' 
-                              : 'border-gray-200 hover:border-gray-300'
-                          }`}
-                        >
-                          <span className={isSelected ? 'text-red-700 font-medium' : 'text-gray-700'}>
-                            {option.name}
-                          </span>
-                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                            isSelected 
-                              ? 'border-red-500 bg-red-500' 
-                              : 'border-gray-300'
-                          }`}>
-                            {isSelected && (
-                              <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                              </svg>
-                            )}
-                          </div>
-                        </button>
-                      )
-                    })}
+            {/* Option Groups - compact */}
+            {optionGroups.map(group => (
+              <div key={group.id} className="px-4 py-3 border-b">
+                <div className="flex justify-between items-center mb-2">
+                  <div>
+                    <h3 className="font-semibold text-gray-800 text-sm">{group.name}</h3>
+                    <p className="text-xs text-gray-500">
+                      {group.selection_type === 'single' 
+                        ? 'Choose 1' 
+                        : `Choose ${group.min_selections}-${group.max_selections}`}
+                      {group.is_required && <span className="text-red-500 ml-1">• Required</span>}
+                    </p>
                   </div>
                 </div>
-              ))}
-
-              {/* Addon Categories - Collapsible */}
-              {addonCategories.map(category => {
-                const isExpanded = expandedAddons[category.id] || false
-                const selectedCount = getSelectedAddonsCount(category)
-                
-                return (
-                  <div key={category.id} className="border-b">
-                    {/* Accordion Header */}
-                    <button
-                      onClick={() => toggleAddonCategory(category.id)}
-                      className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition"
-                    >
-                      <div className="text-left">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-gray-800">{category.name}</h3>
-                          {selectedCount > 0 && (
-                            <span className="bg-red-100 text-red-600 text-xs font-medium px-2 py-0.5 rounded-full">
-                              {selectedCount} added
-                            </span>
+                <div className="space-y-1.5">
+                  {group.options.filter(o => o.is_available).map(option => {
+                    const isSelected = (selectedOptions[group.id] || []).includes(option.id)
+                    return (
+                      <button
+                        key={option.id}
+                        onClick={() => handleOptionChange(group.id, option.id, group.selection_type)}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition ${
+                          isSelected 
+                            ? 'border-red-500 bg-red-50' 
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <span className={`text-sm ${isSelected ? 'text-red-700 font-medium' : 'text-gray-700'}`}>
+                          {option.name}
+                        </span>
+                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                          isSelected 
+                            ? 'border-red-500 bg-red-500' 
+                            : 'border-gray-300'
+                        }`}>
+                          {isSelected && (
+                            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
                           )}
                         </div>
-                        <p className="text-xs text-gray-400">Optional • Add extras</p>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+
+            {/* Addon Categories - Collapsible Accordion - compact */}
+            {addonCategories.map(category => {
+              const isExpanded = expandedAddonId === category.id
+              const selectedCount = getSelectedAddonsCount(category)
+              
+              return (
+                <div key={category.id} className="border-b">
+                  {/* Accordion Header */}
+                  <button
+                    onClick={() => toggleAddonCategory(category.id)}
+                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition"
+                  >
+                    <div className="text-left">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-gray-800 text-sm">{category.name}</h3>
+                        {selectedCount > 0 && (
+                          <span className="bg-red-100 text-red-600 text-xs font-medium px-1.5 py-0.5 rounded-full">
+                            {selectedCount}
+                          </span>
+                        )}
                       </div>
-                      <span className={`text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
-                        ▼
-                      </span>
-                    </button>
-                    
-                    {/* Accordion Content */}
-                    {isExpanded && (
-                      <div className="px-4 pb-4 space-y-2">
-                        {category.addons.map(addon => {
-                          const qty = selectedAddons[addon.id] || 0
-                          return (
-                            <div
-                              key={addon.id}
-                              className={`flex items-center justify-between p-3 rounded-lg border transition ${
-                                qty > 0 ? 'border-red-500 bg-red-50' : 'border-gray-200'
-                              }`}
-                            >
-                              <div>
-                                <span className={qty > 0 ? 'text-red-700 font-medium' : 'text-gray-700'}>
-                                  {addon.name}
-                                </span>
-                                <span className="text-red-600 text-sm ml-2">+${addon.price.toFixed(2)}</span>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                {qty > 0 ? (
-                                  <>
-                                    <button
-                                      onClick={() => handleAddonChange(addon.id, -1)}
-                                      className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center hover:bg-red-200 transition"
-                                    >
-                                      −
-                                    </button>
-                                    <span className="w-6 text-center font-semibold text-gray-800">{qty}</span>
-                                    <button
-                                      onClick={() => handleAddonChange(addon.id, 1)}
-                                      className="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-700 transition"
-                                    >
-                                      +
-                                    </button>
-                                  </>
-                                ) : (
+                      <p className="text-xs text-gray-400">Optional</p>
+                    </div>
+                    <span className={`text-gray-400 text-sm transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                      ▼
+                    </span>
+                  </button>
+                  
+                  {/* Accordion Content */}
+                  {isExpanded && (
+                    <div className="px-4 pb-3 space-y-1.5">
+                      {category.addons.map(addon => {
+                        const qty = selectedAddons[addon.id] || 0
+                        return (
+                          <div
+                            key={addon.id}
+                            className={`flex items-center justify-between px-3 py-2 rounded-lg border transition ${
+                              qty > 0 ? 'border-red-500 bg-red-50' : 'border-gray-200'
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <span className={`text-sm ${qty > 0 ? 'text-red-700 font-medium' : 'text-gray-700'}`}>
+                                {addon.name}
+                              </span>
+                              <span className="text-red-600 text-xs ml-1.5">+${addon.price.toFixed(2)}</span>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {qty > 0 ? (
+                                <>
+                                  <button
+                                    onClick={() => handleAddonChange(addon.id, -1)}
+                                    className="w-7 h-7 rounded-full bg-red-100 text-red-600 flex items-center justify-center hover:bg-red-200 transition text-sm"
+                                  >
+                                    −
+                                  </button>
+                                  <span className="w-5 text-center font-semibold text-gray-800 text-sm">{qty}</span>
                                   <button
                                     onClick={() => handleAddonChange(addon.id, 1)}
-                                    className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition"
+                                    className="w-7 h-7 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-700 transition text-sm"
                                   >
                                     +
                                   </button>
-                                )}
-                              </div>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => handleAddonChange(addon.id, 1)}
+                                  className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition text-sm"
+                                >
+                                  +
+                                </button>
+                              )}
                             </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
 
-              {/* Special Instructions */}
-              <div className="p-4">
-                <h3 className="font-semibold text-gray-800 mb-2">Special Instructions</h3>
-                <textarea
-                  value={specialInstructions}
-                  onChange={(e) => setSpecialInstructions(e.target.value)}
-                  placeholder="Any special requests? (allergies, preferences, etc.)"
-                  className="w-full border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
-                  rows={2}
-                />
-              </div>
-            </>
-          )}
-        </div>
+            {/* Special Instructions - compact */}
+            <div className="px-4 py-3">
+              <h3 className="font-semibold text-gray-800 text-sm mb-1.5">Special Instructions</h3>
+              <textarea
+                value={specialInstructions}
+                onChange={(e) => setSpecialInstructions(e.target.value)}
+                placeholder="Any special requests?"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                rows={2}
+              />
+            </div>
+          </>
+        )}
+      </div>
 
-        {/* Footer - Quantity & Add to Cart */}
-        <div className="flex-shrink-0 border-t bg-white p-4 space-y-3">
+      {/* Footer - Quantity & Add to Cart on same row */}
+      <div className="flex-shrink-0 border-t bg-white px-4 py-3">
+        <div className="flex items-center gap-3">
           {/* Quantity Selector */}
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex items-center gap-1 bg-gray-100 rounded-full p-0.5">
             <button
               onClick={() => setQuantity(q => Math.max(1, q - 1))}
-              className="w-10 h-10 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition text-xl font-medium"
+              className="w-8 h-8 rounded-full bg-white text-gray-600 flex items-center justify-center hover:bg-gray-50 transition text-base font-medium shadow-sm"
             >
               −
             </button>
-            <span className="text-xl font-bold text-gray-800 w-8 text-center">{quantity}</span>
+            <span className="text-base font-bold text-gray-800 w-7 text-center">{quantity}</span>
             <button
               onClick={() => setQuantity(q => q + 1)}
-              className="w-10 h-10 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition text-xl font-medium"
+              className="w-8 h-8 rounded-full bg-white text-gray-600 flex items-center justify-center hover:bg-gray-50 transition text-base font-medium shadow-sm"
             >
               +
             </button>
@@ -488,29 +491,34 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
           <button
             onClick={handleAddToCart}
             disabled={loading}
-            className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-red-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+            className="flex-1 bg-red-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-red-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            <span>Add to Cart</span>
-            <span className="bg-white/20 px-3 py-1 rounded-lg">${total.toFixed(2)}</span>
+            <span>Add to Order</span>
+            <span className="bg-white/20 px-2 py-0.5 rounded-lg text-xs">${total.toFixed(2)}</span>
           </button>
         </div>
       </div>
 
-      <style>{`
-        @keyframes slide-up {
-          from {
-            transform: translateY(100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateY(0);
-            opacity: 1;
-          }
-        }
-        .animate-slide-up {
-          animation: slide-up 0.3s ease-out;
-        }
-      `}</style>
+      {/* Image Zoom Modal */}
+      {showImageZoom && product.image_url && (
+        <div 
+          className="fixed inset-0 z-60 bg-black flex items-center justify-center"
+          onClick={() => setShowImageZoom(false)}
+        >
+          <button
+            onClick={() => setShowImageZoom(false)}
+            className="absolute top-4 right-4 w-10 h-10 bg-white/20 backdrop-blur rounded-full flex items-center justify-center hover:bg-white/30 transition z-10"
+          >
+            <span className="text-white text-2xl">×</span>
+          </button>
+          <img 
+            src={product.image_url} 
+            alt={product.name}
+            className="max-w-full max-h-full object-contain p-4"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   )
 }
