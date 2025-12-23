@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { haptics } from '../lib/haptics'
 
 export function RegisterPage() {
   const [fullName, setFullName] = useState('')
@@ -17,27 +16,24 @@ export function RegisterPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    haptics.tap()
 
     const { error } = await signUp(email, password, fullName, phone)
     
     if (error) {
-      haptics.error()
       setError(error.message)
       setLoading(false)
     } else {
-      haptics.success()
       navigate('/')
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col safe-area-inset">
-      <header className="bg-red-600 text-white p-4 header-safe">
-        <Link to="/" className="text-xl font-bold btn-press">← KomePOS</Link>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="bg-red-600 text-white p-4">
+        <Link to="/" className="text-xl font-bold">← KomePOS</Link>
       </header>
 
-      <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="flex-1 flex items-center justify-center p-4">
         <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
           <h1 className="text-2xl font-bold text-center text-gray-800 mb-6">Create Account</h1>
 
@@ -55,7 +51,6 @@ export function RegisterPage() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                autoComplete="name"
                 required
               />
             </div>
@@ -67,8 +62,6 @@ export function RegisterPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                autoComplete="email"
-                autoCapitalize="off"
                 required
               />
             </div>
@@ -80,7 +73,6 @@ export function RegisterPage() {
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                autoComplete="tel"
                 required
               />
             </div>
@@ -92,7 +84,6 @@ export function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                autoComplete="new-password"
                 minLength={6}
                 required
               />
@@ -101,7 +92,7 @@ export function RegisterPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold active:bg-red-700 transition disabled:opacity-50 btn-press"
+              className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition disabled:opacity-50"
             >
               {loading ? 'Creating account...' : 'Sign Up'}
             </button>
@@ -109,7 +100,7 @@ export function RegisterPage() {
 
           <p className="mt-6 text-center text-gray-600">
             Already have an account?{' '}
-            <Link to="/login" className="text-red-600 font-semibold">
+            <Link to="/login" className="text-red-600 font-semibold hover:underline">
               Sign In
             </Link>
           </p>

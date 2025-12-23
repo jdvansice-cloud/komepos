@@ -95,16 +95,94 @@ function CompanySettings() {
   const [company, setCompany] = useState<Company | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [formData, setFormData] = useState({ name: '', ruc: '', dv: '', itbms_rate: 0.07, address: '', phone: '', email: '', timezone: 'America/Panama' })
+  const [uploading, setUploading] = useState(false)
+  const [formData, setFormData] = useState({ name: '', ruc: '', dv: '', itbms_rate: 0.07, address: '', phone: '', email: '', timezone: 'America/Panama', logo_url: '' })
 
   useEffect(() => { fetchCompany() }, [])
 
   async function fetchCompany() {
     try {
       const { data } = await supabase.from('companies').select('*').single()
-      if (data) { setCompany(data); setFormData({ name: data.name || '', ruc: data.ruc || '', dv: data.dv || '', itbms_rate: data.itbms_rate || 0.07, address: data.address || '', phone: data.phone || '', email: data.email || '', timezone: data.timezone || 'America/Panama' }) }
+      if (data) { 
+        setCompany(data)
+        setFormData({ 
+          name: data.name || '', 
+          ruc: data.ruc || '', 
+          dv: data.dv || '', 
+          itbms_rate: data.itbms_rate || 0.07, 
+          address: data.address || '', 
+          phone: data.phone || '', 
+          email: data.email || '', 
+          timezone: data.timezone || 'America/Panama',
+          logo_url: data.logo_url || ''
+        }) 
+      }
     } catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
+  }
+
+  async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png']
+    if (!allowedTypes.includes(file.type)) { 
+      alert('Only PNG and JPG images are allowed')
+      e.target.value = ''
+      return 
+    }
+    if (file.size > 5 * 1024 * 1024) { 
+      alert('Image must be less than 5MB')
+      e.target.value = ''
+      return 
+    }
+    
+    setUploading(true)
+    try {
+      // Delete old logo if exists
+      if (formData.logo_url && formData.logo_url.includes('/storage/v1/object/public/company/')) {
+        const oldPath = formData.logo_url.split('/company/')[1]
+        if (oldPath) {
+          await supabase.storage.from('company').remove([oldPath])
+        }
+      }
+      
+      const fileExt = file.name.split('.').pop()?.toLowerCase()
+      const fileName = `logo-${Date.now()}.${fileExt}`
+      
+      const { error: uploadError } = await supabase.storage
+        .from('company')
+        .upload(fileName, file, { cacheControl: '3600', upsert: true })
+      
+      if (uploadError) {
+        console.error('Upload error:', uploadError)
+        alert('Failed to upload logo. Make sure the "company" storage bucket exists.')
+        return
+      }
+      
+      const { data: { publicUrl } } = supabase.storage.from('company').getPublicUrl(fileName)
+      setFormData({ ...formData, logo_url: publicUrl })
+    } catch (error) {
+      console.error('Error uploading:', error)
+      alert('Failed to upload logo')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  async function removeLogo() {
+    if (formData.logo_url && formData.logo_url.includes('/storage/v1/object/public/company/')) {
+      try {
+        const path = formData.logo_url.split('/company/')[1]
+        if (path) {
+          await supabase.storage.from('company').remove([path])
+        }
+      } catch (error) {
+        console.error('Error removing logo:', error)
+      }
+    }
+    setFormData({ ...formData, logo_url: '' })
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -112,13 +190,12 @@ function CompanySettings() {
     setSaving(true)
     try {
       await supabase.from('companies').update(formData).eq('id', company?.id)
-      clearTimezoneCache() // Clear cache so new timezone takes effect
+      clearTimezoneCache()
       alert('Settings saved!')
     } catch (error) { console.error('Error:', error) }
     finally { setSaving(false) }
   }
   
-  // Get current time in selected timezone for preview
   function getCurrentTimeInTimezone() {
     try {
       return new Date().toLocaleString('en-US', { 
@@ -142,6 +219,51 @@ function CompanySettings() {
     <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 max-w-2xl">
       <h2 className="text-lg font-semibold text-gray-800 mb-4">Company Information</h2>
       <div className="grid gap-4">
+        {/* Company Logo */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Company Logo</label>
+          <div className="flex items-start gap-4">
+            {formData.logo_url ? (
+              <div className="relative">
+                <img src={formData.logo_url} alt="Company logo" className="w-32 h-32 object-contain border rounded-lg bg-gray-50" />
+                <button
+                  type="button"
+                  onClick={removeLogo}
+                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm hover:bg-red-600"
+                >
+                  ×
+                </button>
+              </div>
+            ) : (
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center w-32 h-32 flex flex-col items-center justify-center">
+                <input
+                  type="file"
+                  accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                  onChange={handleLogoUpload}
+                  disabled={uploading}
+                  className="hidden"
+                  id="logo-upload"
+                />
+                <label htmlFor="logo-upload" className={`cursor-pointer ${uploading ? 'opacity-50' : ''}`}>
+                  {uploading ? (
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
+                  ) : (
+                    <>
+                      <div className="text-2xl mb-1">🏢</div>
+                      <p className="text-xs text-gray-500">Upload Logo</p>
+                    </>
+                  )}
+                </label>
+              </div>
+            )}
+            <div className="text-xs text-gray-500">
+              <p>Recommended: Square image (1:1 ratio)</p>
+              <p>Max size: 5MB</p>
+              <p>Formats: PNG, JPG</p>
+            </div>
+          </div>
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
           <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required />
@@ -192,7 +314,7 @@ function CompanySettings() {
         </div>
       </div>
       <div className="mt-6">
-        <button type="submit" disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+        <button type="submit" disabled={saving || uploading} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50">
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
@@ -1133,6 +1255,7 @@ function CategoriesSettings() {
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Category | null>(null)
   const [formData, setFormData] = useState({ name: '', description: '', image_url: '', sort_order: 0, is_active: true })
+  const [uploading, setUploading] = useState(false)
 
   useEffect(() => { fetchCategories() }, [])
 
@@ -1155,6 +1278,70 @@ function CategoriesSettings() {
     setShowModal(true)
   }
 
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png']
+    if (!allowedTypes.includes(file.type)) { 
+      alert('Only PNG and JPG images are allowed')
+      e.target.value = ''
+      return 
+    }
+    if (file.size > 5 * 1024 * 1024) { 
+      alert('Image must be less than 5MB')
+      e.target.value = ''
+      return 
+    }
+    
+    setUploading(true)
+    try {
+      // Delete old image if exists
+      if (formData.image_url && formData.image_url.includes('/storage/v1/object/public/categories/')) {
+        const oldPath = formData.image_url.split('/categories/')[1]
+        if (oldPath) {
+          await supabase.storage.from('categories').remove([oldPath])
+        }
+      }
+      
+      const fileExt = file.name.split('.').pop()?.toLowerCase()
+      const fileName = `category-${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
+      
+      const { error: uploadError } = await supabase.storage
+        .from('categories')
+        .upload(fileName, file, { cacheControl: '3600', upsert: false })
+      
+      if (uploadError) {
+        console.error('Upload error:', uploadError)
+        alert('Failed to upload image. Make sure the "categories" storage bucket exists.')
+        return
+      }
+      
+      const { data: { publicUrl } } = supabase.storage.from('categories').getPublicUrl(fileName)
+      setFormData({ ...formData, image_url: publicUrl })
+    } catch (error) {
+      console.error('Error uploading:', error)
+      alert('Failed to upload image')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  async function removeImage() {
+    if (formData.image_url && formData.image_url.includes('/storage/v1/object/public/categories/')) {
+      try {
+        const path = formData.image_url.split('/categories/')[1]
+        if (path) {
+          await supabase.storage.from('categories').remove([path])
+        }
+      } catch (error) {
+        console.error('Error removing image:', error)
+      }
+    }
+    setFormData({ ...formData, image_url: '' })
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     try {
@@ -1170,6 +1357,20 @@ function CategoriesSettings() {
 
   async function deleteCategory(id: string) {
     if (!confirm('Delete this category? Products in this category will need to be reassigned.')) return
+    
+    // Find the category to delete its image
+    const category = categories.find(c => c.id === id)
+    if (category?.image_url && category.image_url.includes('/storage/v1/object/public/categories/')) {
+      try {
+        const path = category.image_url.split('/categories/')[1]
+        if (path) {
+          await supabase.storage.from('categories').remove([path])
+        }
+      } catch (error) {
+        console.error('Error removing image:', error)
+      }
+    }
+    
     await supabase.from('categories').delete().eq('id', id)
     fetchCategories()
   }
@@ -1186,7 +1387,11 @@ function CategoriesSettings() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {categories.map(category => (
           <div key={category.id} className="bg-white rounded-lg shadow overflow-hidden">
-            {category.image_url && <img src={category.image_url} alt={category.name} className="w-full h-32 object-cover" />}
+            {category.image_url ? (
+              <img src={category.image_url} alt={category.name} className="w-full h-32 object-cover" />
+            ) : (
+              <div className="w-full h-32 bg-gray-100 flex items-center justify-center text-4xl">🍽️</div>
+            )}
             <div className="p-4">
               <div className="flex justify-between items-start">
                 <div>
@@ -1210,14 +1415,55 @@ function CategoriesSettings() {
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <h2 className="text-xl font-bold mb-4">{editing ? 'Edit Category' : 'Add Category'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Category Image Upload */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category Image</label>
+                {formData.image_url ? (
+                  <div className="relative inline-block">
+                    <img src={formData.image_url} alt="Category preview" className="w-full h-32 object-cover rounded-lg border" />
+                    <button
+                      type="button"
+                      onClick={removeImage}
+                      className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm hover:bg-red-600"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ) : (
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                    <input
+                      type="file"
+                      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                      onChange={handleImageUpload}
+                      disabled={uploading}
+                      className="hidden"
+                      id="category-image-upload"
+                    />
+                    <label htmlFor="category-image-upload" className={`cursor-pointer ${uploading ? 'opacity-50' : ''}`}>
+                      {uploading ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                          <span className="text-gray-600">Uploading...</span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="text-3xl mb-2">📷</div>
+                          <p className="text-sm text-gray-600">Click to upload image</p>
+                          <p className="text-xs text-gray-400 mt-1">Max 5MB, JPG/PNG only</p>
+                        </>
+                      )}
+                    </label>
+                  </div>
+                )}
+              </div>
+              
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={2} /></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Image URL</label><input type="url" value={formData.image_url} onChange={(e) => setFormData({ ...formData, image_url: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Sort Order</label><input type="number" value={formData.sort_order} onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" /></div>
               <label className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" /><span className="text-sm">Active</span></label>
               <div className="flex justify-end gap-2 pt-4">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">{editing ? 'Save' : 'Add'}</button>
+                <button type="submit" disabled={uploading} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{editing ? 'Save' : 'Add'}</button>
               </div>
             </form>
           </div>

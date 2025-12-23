@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { haptics } from '../lib/haptics'
 
 export function LoginPage() {
   const [email, setEmail] = useState('')
@@ -15,24 +14,21 @@ export function LoginPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    haptics.tap()
 
     const { error } = await signIn(email, password)
     
     if (error) {
-      haptics.error()
       setError(error.message)
       setLoading(false)
     } else {
-      haptics.success()
       navigate('/')
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col safe-area-inset">
-      <header className="bg-red-600 text-white p-4 header-safe">
-        <Link to="/" className="text-xl font-bold btn-press">← KomePOS</Link>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="bg-red-600 text-white p-4">
+        <Link to="/" className="text-xl font-bold">← KomePOS</Link>
       </header>
 
       <div className="flex-1 flex items-center justify-center p-4">
@@ -53,8 +49,6 @@ export function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                autoComplete="email"
-                autoCapitalize="off"
                 required
               />
             </div>
@@ -66,7 +60,6 @@ export function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                autoComplete="current-password"
                 required
               />
             </div>
@@ -74,7 +67,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold active:bg-red-700 transition disabled:opacity-50 btn-press"
+              className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition disabled:opacity-50"
             >
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
@@ -82,13 +75,13 @@ export function LoginPage() {
 
           <p className="mt-6 text-center text-gray-600">
             Don't have an account?{' '}
-            <Link to="/register" className="text-red-600 font-semibold">
+            <Link to="/register" className="text-red-600 font-semibold hover:underline">
               Sign Up
             </Link>
           </p>
 
           <p className="mt-4 text-center">
-            <Link to="/" className="text-gray-500 text-sm">
+            <Link to="/" className="text-gray-500 text-sm hover:underline">
               Continue as guest
             </Link>
           </p>
