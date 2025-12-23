@@ -168,23 +168,40 @@ export function POSPage() {
       }
       
       // Load items into cart with original prices from order_items
-      const cartItems: CartItem[] = items.map((item: any, index: number) => ({
-        product: {
-          id: item.product_id,
-          name: item.product_name,
-          description: '',
-          base_price: item.unit_price, // Use the original unit price from the order
-          image_url: '',
-          category_id: '',
-          is_taxable: item.is_taxable,
-          has_options: false
-        },
-        quantity: item.quantity,
-        notes: item.item_notes || '',
-        selectedOptions: item.options_json || [],
-        selectedAddons: item.addons_json || [],
-        cartItemId: `refund-${index}-${Date.now()}`
-      }))
+      const cartItems: CartItem[] = items.map((item: any, index: number) => {
+        // Convert stored JSON format to CartItem format
+        const selectedOptions: SelectedOption[] = (item.options_json || []).map((opt: any, i: number) => ({
+          groupId: `group-${i}`,
+          groupName: opt.group_name || '',
+          optionId: `opt-${i}`,
+          optionName: opt.option_name || ''
+        }))
+        
+        const selectedAddons: SelectedAddon[] = (item.addons_json || []).map((addon: any, i: number) => ({
+          addonId: `addon-${i}`,
+          addonName: addon.name || '',
+          price: addon.price || 0,
+          categoryName: addon.category || ''
+        }))
+        
+        return {
+          product: {
+            id: item.product_id,
+            name: item.product_name,
+            description: '',
+            base_price: item.unit_price, // Use the original unit price from the order
+            image_url: '',
+            category_id: '',
+            is_taxable: item.is_taxable,
+            has_options: false
+          },
+          quantity: item.quantity,
+          notes: item.item_notes || '',
+          selectedOptions,
+          selectedAddons,
+          cartItemId: `refund-${index}-${Date.now()}`
+        }
+      })
       setCart(cartItems)
       
       // Set order notes
@@ -684,16 +701,37 @@ export function POSPage() {
         if (refundError) throw refundError
 
         // Create refund items with negative prices
-        const refundItems = cart.map(item => ({
-          order_id: refund.id,
-          product_id: item.product.id,
-          product_name: item.product.name,
-          quantity: item.quantity,
-          unit_price: -Math.abs(item.product.base_price), // Negative price for refund
-          line_total: -(Math.abs(item.product.base_price) * item.quantity),
-          item_notes: item.notes ? `Refund: ${item.notes}` : 'Refund',
-          is_taxable: item.product.is_taxable,
-        }))
+        const refundItems = cart.map(item => {
+          // Build options JSON for refund record
+          const optionsJson = item.selectedOptions && item.selectedOptions.length > 0
+            ? item.selectedOptions.map(opt => ({
+                group_name: opt.groupName,
+                option_name: opt.optionName
+              }))
+            : null
+          
+          // Build addons JSON for refund record
+          const addonsJson = item.selectedAddons && item.selectedAddons.length > 0
+            ? item.selectedAddons.map(addon => ({
+                name: addon.addonName,
+                price: addon.price,
+                category: addon.categoryName
+              }))
+            : null
+          
+          return {
+            order_id: refund.id,
+            product_id: item.product.id,
+            product_name: item.product.name,
+            quantity: item.quantity,
+            unit_price: -Math.abs(item.product.base_price), // Negative price for refund
+            line_total: -(Math.abs(item.product.base_price) * item.quantity),
+            item_notes: item.notes ? `Refund: ${item.notes}` : 'Refund',
+            is_taxable: item.product.is_taxable,
+            options_json: optionsJson,
+            addons_json: addonsJson,
+          }
+        })
 
         const { error: itemsError } = await supabase
           .from('order_items')

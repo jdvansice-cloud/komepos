@@ -111,7 +111,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (profileError || !profileData) {
         // Not a POS user - sign them out
-        console.log('User is not a POS staff member')
         await supabase.auth.signOut()
         setProfile(null)
         setLoading(false)

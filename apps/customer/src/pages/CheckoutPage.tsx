@@ -43,17 +43,17 @@ export function CheckoutPage() {
       
       const { data: order, error: orderError } = await supabase.from('orders').insert({
         order_number: orderNumber,
-        company_id: profile.company_id,
         location_id: location?.id,
         customer_id: profile.id,
         status: 'pending',
-        order_type: orderType,
+        order_type: orderType === 'pickup' ? 'takeout' : 'delivery',
         subtotal: subtotal,
         tax_amount: tax,
         delivery_fee: deliveryFee,
         discount_amount: 0,
         total: grandTotal,
-        notes: notes,
+        customer_notes: notes || null,
+        payment_status: 'pending',
       }).select().single()
 
       if (orderError) throw orderError
@@ -62,9 +62,11 @@ export function CheckoutPage() {
       const orderItems = items.map(item => ({
         order_id: order.id,
         product_id: item.product_id,
+        product_name: item.name,
         quantity: item.quantity,
         unit_price: item.price,
-        subtotal: item.price * item.quantity,
+        line_total: item.price * item.quantity,
+        is_taxable: true,
       }))
 
       await supabase.from('order_items').insert(orderItems)

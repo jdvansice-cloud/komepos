@@ -64,7 +64,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error || !data) {
         // Not a customer - sign them out
-        console.log('User is not a customer')
         await supabase.auth.signOut()
         setProfile(null)
         return

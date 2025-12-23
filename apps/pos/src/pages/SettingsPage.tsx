@@ -1267,22 +1267,25 @@ function ProductsSettings() {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      alert('Please select an image file')
+    // Validate file type - only PNG and JPG allowed
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png']
+    if (!allowedTypes.includes(file.type)) {
+      alert('Only PNG and JPG images are allowed')
+      e.target.value = '' // Reset input
       return
     }
 
     // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       alert('Image must be less than 5MB')
+      e.target.value = ''
       return
     }
 
     setUploading(true)
     try {
       // Create unique filename
-      const fileExt = file.name.split('.').pop()
+      const fileExt = file.name.split('.').pop()?.toLowerCase()
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
       const filePath = `products/${fileName}`
 
@@ -1311,6 +1314,7 @@ function ProductsSettings() {
       alert('Failed to upload image')
     } finally {
       setUploading(false)
+      e.target.value = '' // Reset input for next upload
     }
   }
 
@@ -1429,7 +1433,7 @@ function ProductsSettings() {
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
                     <input
                       type="file"
-                      accept="image/*"
+                      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
                       onChange={handleImageUpload}
                       disabled={uploading}
                       className="hidden"
@@ -1448,7 +1452,7 @@ function ProductsSettings() {
                         <>
                           <div className="text-3xl mb-2">📷</div>
                           <p className="text-sm text-gray-600">Click to upload image</p>
-                          <p className="text-xs text-gray-400 mt-1">Max 5MB, JPG/PNG/GIF</p>
+                          <p className="text-xs text-gray-400 mt-1">Max 5MB, JPG/PNG only</p>
                         </>
                       )}
                     </label>
@@ -1531,7 +1535,7 @@ function PromosSettings() {
           setPromoLocationCounts(counts)
         }
       } catch (locError) {
-        console.log('promo_locations table may not exist yet:', locError)
+        console.error('promo_locations table may not exist yet:', locError)
       }
     }
     catch (error) { console.error('Error:', error) }
@@ -1621,7 +1625,7 @@ function PromosSettings() {
           await supabase.from('promo_locations').insert(promoLocs)
         }
       } catch (locError) {
-        console.log('Could not save location restrictions (table may not exist):', locError)
+        console.error('Could not save location restrictions (table may not exist):', locError)
       }
       
       setShowModal(false)
