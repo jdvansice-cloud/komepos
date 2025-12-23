@@ -15,6 +15,7 @@ interface Product {
   category_id: string
   is_active: boolean
   has_options: boolean
+  has_addons?: boolean
   sort_order: number
 }
 
@@ -30,12 +31,20 @@ export function HomePage() {
 
   async function fetchData() {
     try {
-      const [catRes, prodRes] = await Promise.all([
+      const [catRes, prodRes, addonsRes] = await Promise.all([
         supabase.from('categories').select('*').eq('is_active', true).order('sort_order'),
         supabase.from('products').select('*').eq('is_active', true).order('sort_order'),
+        supabase.from('product_addons').select('product_id'),
       ])
       setCategories(catRes.data || [])
-      setProducts(prodRes.data || [])
+      
+      // Mark products that have addons
+      const productsWithAddons = new Set((addonsRes.data || []).map(pa => pa.product_id))
+      const productsWithFlags = (prodRes.data || []).map(p => ({
+        ...p,
+        has_addons: productsWithAddons.has(p.id)
+      }))
+      setProducts(productsWithFlags)
     } catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
   }
@@ -52,7 +61,8 @@ export function HomePage() {
 
   function handleQuickAdd(e: React.MouseEvent, product: Product) {
     e.stopPropagation()
-    if (product.has_options) {
+    // Open modal if product has options OR addons
+    if (product.has_options || product.has_addons) {
       setSelectedProduct(product)
     } else {
       addSimpleItem({ 
@@ -146,7 +156,7 @@ export function HomePage() {
                     <div className="flex justify-between items-center mt-2">
                       <div>
                         <span className="font-bold text-red-600">${(product.base_price || 0).toFixed(2)}</span>
-                        {product.has_options && (
+                        {(product.has_options || product.has_addons) && (
                           <span className="text-xs text-gray-400 ml-1">+options</span>
                         )}
                       </div>
@@ -154,7 +164,7 @@ export function HomePage() {
                         onClick={(e) => handleQuickAdd(e, product)}
                         className="bg-red-600 text-white px-4 py-1.5 rounded-full text-sm font-medium hover:bg-red-700 transition flex items-center gap-1"
                       >
-                        {product.has_options ? (
+                        {(product.has_options || product.has_addons) ? (
                           <>
                             <span>Select</span>
                             <span className="text-xs">▼</span>

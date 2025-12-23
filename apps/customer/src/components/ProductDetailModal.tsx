@@ -64,6 +64,7 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
   const [addonCategories, setAddonCategories] = useState<AddonCategory[]>([])
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string[]>>({})
   const [selectedAddons, setSelectedAddons] = useState<Record<string, number>>({})
+  const [expandedAddons, setExpandedAddons] = useState<Record<string, boolean>>({})
   const [quantity, setQuantity] = useState(1)
   const [specialInstructions, setSpecialInstructions] = useState('')
   const [loading, setLoading] = useState(true)
@@ -171,6 +172,18 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
       }
       return { ...prev, [addonId]: newValue }
     })
+  }
+
+  function toggleAddonCategory(categoryId: string) {
+    setExpandedAddons(prev => ({
+      ...prev,
+      [categoryId]: !prev[categoryId]
+    }))
+  }
+
+  // Helper to count selected addons in a category
+  function getSelectedAddonsCount(category: AddonCategory): number {
+    return category.addons.reduce((sum, addon) => sum + (selectedAddons[addon.id] || 0), 0)
   }
 
   function validateSelections(): boolean {
@@ -356,64 +369,86 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
                 </div>
               ))}
 
-              {/* Addon Categories */}
-              {addonCategories.map(category => (
-                <div key={category.id} className="p-4 border-b">
-                  <div className="mb-3">
-                    <h3 className="font-semibold text-gray-800">{category.name}</h3>
-                    {category.description && (
-                      <p className="text-xs text-gray-500">{category.description}</p>
-                    )}
-                    <p className="text-xs text-gray-400">Optional • Add extras</p>
-                  </div>
-                  <div className="space-y-2">
-                    {category.addons.map(addon => {
-                      const qty = selectedAddons[addon.id] || 0
-                      return (
-                        <div
-                          key={addon.id}
-                          className={`flex items-center justify-between p-3 rounded-lg border transition ${
-                            qty > 0 ? 'border-red-500 bg-red-50' : 'border-gray-200'
-                          }`}
-                        >
-                          <div>
-                            <span className={qty > 0 ? 'text-red-700 font-medium' : 'text-gray-700'}>
-                              {addon.name}
+              {/* Addon Categories - Collapsible */}
+              {addonCategories.map(category => {
+                const isExpanded = expandedAddons[category.id] || false
+                const selectedCount = getSelectedAddonsCount(category)
+                
+                return (
+                  <div key={category.id} className="border-b">
+                    {/* Accordion Header */}
+                    <button
+                      onClick={() => toggleAddonCategory(category.id)}
+                      className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition"
+                    >
+                      <div className="text-left">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-800">{category.name}</h3>
+                          {selectedCount > 0 && (
+                            <span className="bg-red-100 text-red-600 text-xs font-medium px-2 py-0.5 rounded-full">
+                              {selectedCount} added
                             </span>
-                            <span className="text-red-600 text-sm ml-2">+${addon.price.toFixed(2)}</span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            {qty > 0 ? (
-                              <>
-                                <button
-                                  onClick={() => handleAddonChange(addon.id, -1)}
-                                  className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center hover:bg-red-200 transition"
-                                >
-                                  −
-                                </button>
-                                <span className="w-6 text-center font-semibold text-gray-800">{qty}</span>
-                                <button
-                                  onClick={() => handleAddonChange(addon.id, 1)}
-                                  className="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-700 transition"
-                                >
-                                  +
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                onClick={() => handleAddonChange(addon.id, 1)}
-                                className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition"
-                              >
-                                +
-                              </button>
-                            )}
-                          </div>
+                          )}
                         </div>
-                      )
-                    })}
+                        <p className="text-xs text-gray-400">Optional • Add extras</p>
+                      </div>
+                      <span className={`text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                        ▼
+                      </span>
+                    </button>
+                    
+                    {/* Accordion Content */}
+                    {isExpanded && (
+                      <div className="px-4 pb-4 space-y-2">
+                        {category.addons.map(addon => {
+                          const qty = selectedAddons[addon.id] || 0
+                          return (
+                            <div
+                              key={addon.id}
+                              className={`flex items-center justify-between p-3 rounded-lg border transition ${
+                                qty > 0 ? 'border-red-500 bg-red-50' : 'border-gray-200'
+                              }`}
+                            >
+                              <div>
+                                <span className={qty > 0 ? 'text-red-700 font-medium' : 'text-gray-700'}>
+                                  {addon.name}
+                                </span>
+                                <span className="text-red-600 text-sm ml-2">+${addon.price.toFixed(2)}</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                {qty > 0 ? (
+                                  <>
+                                    <button
+                                      onClick={() => handleAddonChange(addon.id, -1)}
+                                      className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center hover:bg-red-200 transition"
+                                    >
+                                      −
+                                    </button>
+                                    <span className="w-6 text-center font-semibold text-gray-800">{qty}</span>
+                                    <button
+                                      onClick={() => handleAddonChange(addon.id, 1)}
+                                      className="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-700 transition"
+                                    >
+                                      +
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={() => handleAddonChange(addon.id, 1)}
+                                    className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition"
+                                  >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
 
               {/* Special Instructions */}
               <div className="p-4">
