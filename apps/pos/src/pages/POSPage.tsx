@@ -5,8 +5,23 @@ import { useAuth } from '../context/AuthContext'
 import { getTodayInTimezone } from '../lib/timezone'
 
 interface Category { id: string; name: string; sort_order: number }
-interface Product { id: string; name: string; description: string; base_price: number; image_url: string; category_id: string; is_taxable: boolean }
-interface CartItem { product: Product; quantity: number; notes: string; promoDiscount?: number; promoName?: string }
+interface Product { id: string; name: string; description: string; base_price: number; image_url: string; category_id: string; is_taxable: boolean; has_options: boolean }
+interface OptionGroup { id: string; product_id: string; name: string; selection_type: 'single' | 'multiple'; min_selections: number; max_selections: number; is_required: boolean; sort_order: number; options: Option[] }
+interface Option { id: string; option_group_id: string; name: string; is_default: boolean; is_available: boolean; sort_order: number }
+interface AddonCategory { id: string; name: string; sort_order: number; addons: Addon[] }
+interface Addon { id: string; addon_category_id: string; name: string; price: number; is_available: boolean; sort_order: number }
+interface SelectedOption { groupId: string; groupName: string; optionId: string; optionName: string }
+interface SelectedAddon { addonId: string; addonName: string; price: number; categoryName: string }
+interface CartItem { 
+  product: Product
+  quantity: number
+  notes: string
+  promoDiscount?: number
+  promoName?: string
+  selectedOptions?: SelectedOption[]
+  selectedAddons?: SelectedAddon[]
+  cartItemId: string // Unique ID for cart items with different options
+}
 interface Customer { id: string; full_name: string; phone: string; email: string }
 interface DeliveryZone { id: string; name: string; delivery_fee: number }
 interface ItemPromo { id: string; name: string; discount_type: 'item_percentage' | 'item_fixed'; discount_value: number; product_ids: string[] }
@@ -78,6 +93,16 @@ export function POSPage() {
   
   // Active item promos
   const [itemPromos, setItemPromos] = useState<ItemPromo[]>([])
+  
+  // Product options modal
+  const [showProductModal, setShowProductModal] = useState(false)
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [productOptionGroups, setProductOptionGroups] = useState<OptionGroup[]>([])
+  const [productAddonCategories, setProductAddonCategories] = useState<AddonCategory[]>([])
+  const [modalSelectedOptions, setModalSelectedOptions] = useState<Record<string, string[]>>({}) // groupId -> optionIds
+  const [modalSelectedAddons, setModalSelectedAddons] = useState<string[]>([]) // addonIds
+  const [productQuantity, setProductQuantity] = useState(1)
+  const [productNotes, setProductNotes] = useState('')
 
   useEffect(() => { fetchData() }, [activeLocation])
   
@@ -143,7 +168,7 @@ export function POSPage() {
       }
       
       // Load items into cart with original prices from order_items
-      const cartItems: CartItem[] = items.map((item: any) => ({
+      const cartItems: CartItem[] = items.map((item: any, index: number) => ({
         product: {
           id: item.product_id,
           name: item.product_name,
@@ -151,10 +176,14 @@ export function POSPage() {
           base_price: item.unit_price, // Use the original unit price from the order
           image_url: '',
           category_id: '',
-          is_taxable: item.is_taxable
+          is_taxable: item.is_taxable,
+          has_options: false
         },
         quantity: item.quantity,
-        notes: item.item_notes || ''
+        notes: item.item_notes || '',
+        selectedOptions: item.options_json || [],
+        selectedAddons: item.addons_json || [],
+        cartItemId: `refund-${index}-${Date.now()}`
       }))
       setCart(cartItems)
       
@@ -323,14 +352,77 @@ export function POSPage() {
     return null
   }
 
-  function addToCart(product: Product) {
+  // Handle product click - check for options/addons
+  async function handleProductClick(product: Product) {
+    // Fetch options and addons for this product
+    const [optionGroupsRes, productAddonsRes] = await Promise.all([
+      supabase
+        .from('option_groups')
+        .select('*, options(*)')
+        .eq('product_id', product.id)
+        .order('sort_order'),
+      supabase
+        .from('product_addons')
+        .select('addon_category:addon_categories(id, name, sort_order, addons(*))')
+        .eq('product_id', product.id)
+    ])
+    
+    const optionGroups: OptionGroup[] = (optionGroupsRes.data || []).map((og: any) => ({
+      ...og,
+      options: (og.options || []).filter((o: any) => o.is_available).sort((a: any, b: any) => a.sort_order - b.sort_order)
+    }))
+    
+    const addonCategories: AddonCategory[] = (productAddonsRes.data || [])
+      .map((pa: any) => pa.addon_category)
+      .filter((ac: any) => ac)
+      .map((ac: any) => ({
+        ...ac,
+        addons: (ac.addons || []).filter((a: any) => a.is_available).sort((a: any, b: any) => a.sort_order - b.sort_order)
+      }))
+      .sort((a: any, b: any) => a.sort_order - b.sort_order)
+    
+    // If product has options or addons, show modal
+    if (product.has_options || optionGroups.length > 0 || addonCategories.length > 0) {
+      setSelectedProduct(product)
+      setProductOptionGroups(optionGroups)
+      setProductAddonCategories(addonCategories)
+      setProductQuantity(1)
+      setProductNotes('')
+      
+      // Set default options
+      const defaultOptions: Record<string, string[]> = {}
+      optionGroups.forEach(og => {
+        const defaultOption = og.options.find(o => o.is_default)
+        if (defaultOption) {
+          defaultOptions[og.id] = [defaultOption.id]
+        } else if (og.is_required && og.selection_type === 'single' && og.options.length > 0) {
+          defaultOptions[og.id] = [og.options[0].id]
+        }
+      })
+      setModalSelectedOptions(defaultOptions)
+      setModalSelectedAddons([])
+      setShowProductModal(true)
+    } else {
+      // No options - add directly to cart
+      addToCartSimple(product)
+    }
+  }
+  
+  // Add product without options
+  function addToCartSimple(product: Product) {
     const promoInfo = calculatePromoDiscount(product)
+    const cartItemId = `${product.id}-${Date.now()}`
     
     setCart(prev => {
-      const existing = prev.find(item => item.product.id === product.id)
+      // Find existing item with same product and no options/addons
+      const existing = prev.find(item => 
+        item.product.id === product.id && 
+        !item.selectedOptions?.length && 
+        !item.selectedAddons?.length
+      )
       if (existing) {
         return prev.map(item => 
-          item.product.id === product.id 
+          item.cartItemId === existing.cartItemId 
             ? { ...item, quantity: item.quantity + 1 }
             : item
         )
@@ -340,14 +432,133 @@ export function POSPage() {
         quantity: 1, 
         notes: '',
         promoDiscount: promoInfo?.discount,
-        promoName: promoInfo?.promoName
+        promoName: promoInfo?.promoName,
+        selectedOptions: [],
+        selectedAddons: [],
+        cartItemId
       }]
     })
   }
+  
+  // Add product with options and addons from modal
+  function addToCartWithOptions() {
+    if (!selectedProduct) return
+    
+    const promoInfo = calculatePromoDiscount(selectedProduct)
+    const cartItemId = `${selectedProduct.id}-${Date.now()}`
+    
+    // Build selected options array
+    const selectedOpts: SelectedOption[] = []
+    Object.entries(modalSelectedOptions).forEach(([groupId, optionIds]) => {
+      const group = productOptionGroups.find(g => g.id === groupId)
+      if (group) {
+        optionIds.forEach(optId => {
+          const option = group.options.find(o => o.id === optId)
+          if (option) {
+            selectedOpts.push({
+              groupId: group.id,
+              groupName: group.name,
+              optionId: option.id,
+              optionName: option.name
+            })
+          }
+        })
+      }
+    })
+    
+    // Build selected addons array
+    const selectedAdds: SelectedAddon[] = []
+    modalSelectedAddons.forEach(addonId => {
+      for (const category of productAddonCategories) {
+        const addon = category.addons.find(a => a.id === addonId)
+        if (addon) {
+          selectedAdds.push({
+            addonId: addon.id,
+            addonName: addon.name,
+            price: addon.price,
+            categoryName: category.name
+          })
+          break
+        }
+      }
+    })
+    
+    setCart(prev => [...prev, {
+      product: selectedProduct,
+      quantity: productQuantity,
+      notes: productNotes,
+      promoDiscount: promoInfo?.discount,
+      promoName: promoInfo?.promoName,
+      selectedOptions: selectedOpts,
+      selectedAddons: selectedAdds,
+      cartItemId
+    }])
+    
+    setShowProductModal(false)
+    setSelectedProduct(null)
+  }
+  
+  // Check if required options are selected
+  function canAddToCart(): boolean {
+    for (const group of productOptionGroups) {
+      if (group.is_required) {
+        const selected = modalSelectedOptions[group.id] || []
+        if (selected.length < group.min_selections) {
+          return false
+        }
+      }
+    }
+    return true
+  }
+  
+  // Toggle option selection
+  function toggleOption(groupId: string, optionId: string, selectionType: 'single' | 'multiple', maxSelections: number) {
+    setModalSelectedOptions(prev => {
+      const current = prev[groupId] || []
+      
+      if (selectionType === 'single') {
+        return { ...prev, [groupId]: [optionId] }
+      } else {
+        // Multiple selection
+        if (current.includes(optionId)) {
+          return { ...prev, [groupId]: current.filter(id => id !== optionId) }
+        } else {
+          if (current.length < maxSelections) {
+            return { ...prev, [groupId]: [...current, optionId] }
+          }
+          return prev
+        }
+      }
+    })
+  }
+  
+  // Toggle addon selection
+  function toggleAddon(addonId: string) {
+    setModalSelectedAddons(prev => 
+      prev.includes(addonId) 
+        ? prev.filter(id => id !== addonId)
+        : [...prev, addonId]
+    )
+  }
+  
+  // Calculate addon total for modal
+  function getAddonTotal(): number {
+    let total = 0
+    modalSelectedAddons.forEach(addonId => {
+      for (const category of productAddonCategories) {
+        const addon = category.addons.find(a => a.id === addonId)
+        if (addon) {
+          total += addon.price
+          break
+        }
+      }
+    })
+    return total
+  }
 
-  function updateQuantity(productId: string, delta: number) {
+  function updateQuantity(cartItemId: string, delta: number) {
     setCart(prev => prev
-      .map(item => item.product.id === productId 
+      .map(item => item.cartItemId === cartItemId 
         ? { ...item, quantity: Math.max(0, item.quantity + delta) }
         : item
       )
@@ -355,15 +566,22 @@ export function POSPage() {
     )
   }
 
-  function updateNotes(productId: string, notes: string) {
+  function updateNotes(cartItemId: string, notes: string) {
     setCart(prev => prev.map(item => 
-      item.product.id === productId ? { ...item, notes } : item
+      item.cartItemId === cartItemId ? { ...item, notes } : item
     ))
   }
 
+  // Helper to calculate item price including addons
+  function getItemPrice(item: CartItem): number {
+    const basePrice = item.product.base_price
+    const addonsPrice = (item.selectedAddons || []).reduce((sum, addon) => sum + addon.price, 0)
+    return basePrice + addonsPrice
+  }
+
   // Calculations
-  // Items subtotal (full prices before any discounts)
-  const itemsSubtotalFull = cart.reduce((sum, item) => sum + (item.product.base_price * item.quantity), 0)
+  // Items subtotal (full prices before any discounts, including addons)
+  const itemsSubtotalFull = cart.reduce((sum, item) => sum + (getItemPrice(item) * item.quantity), 0)
   
   // Promo discounts (automatic item discounts)
   const promoDiscountTotal = cart.reduce((sum, item) => 
@@ -551,17 +769,40 @@ export function POSPage() {
 
         if (orderError) throw orderError
 
-        // Create order items
-        const orderItems = cart.map(item => ({
-          order_id: order.id,
-          product_id: item.product.id,
-          product_name: item.product.name,
-          quantity: item.quantity,
-          unit_price: item.product.base_price,
-          line_total: item.product.base_price * item.quantity,
-          item_notes: item.notes || null,
-          is_taxable: item.product.is_taxable,
-        }))
+        // Create order items with options and addons
+        const orderItems = cart.map(item => {
+          const itemPrice = getItemPrice(item)
+          
+          // Build options JSON
+          const optionsJson = item.selectedOptions && item.selectedOptions.length > 0
+            ? item.selectedOptions.map(opt => ({
+                group_name: opt.groupName,
+                option_name: opt.optionName
+              }))
+            : null
+          
+          // Build addons JSON
+          const addonsJson = item.selectedAddons && item.selectedAddons.length > 0
+            ? item.selectedAddons.map(addon => ({
+                name: addon.addonName,
+                price: addon.price,
+                category: addon.categoryName
+              }))
+            : null
+          
+          return {
+            order_id: order.id,
+            product_id: item.product.id,
+            product_name: item.product.name,
+            quantity: item.quantity,
+            unit_price: itemPrice,
+            line_total: itemPrice * item.quantity,
+            item_notes: item.notes || null,
+            is_taxable: item.product.is_taxable,
+            options_json: optionsJson,
+            addons_json: addonsJson,
+          }
+        })
 
         const { error: itemsError } = await supabase
           .from('order_items')
@@ -710,12 +951,17 @@ export function POSPage() {
                 return (
                   <button
                     key={product.id}
-                    onClick={() => addToCart(product)}
+                    onClick={() => handleProductClick(product)}
                     className={`rounded-lg shadow hover:shadow-md transition p-3 text-left relative ${hasPromo ? 'bg-green-50 border-2 border-green-300' : 'bg-white'}`}
                   >
                     {hasPromo && (
                       <div className="absolute -top-2 -right-2 bg-green-600 text-white text-xs px-2 py-0.5 rounded-full">
                         🏷️ Sale
+                      </div>
+                    )}
+                    {product.has_options && (
+                      <div className="absolute -top-2 -left-2 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full">
+                        ⚙️ Options
                       </div>
                     )}
                     {product.image_url ? (
@@ -852,13 +1098,14 @@ export function POSPage() {
             <div className="space-y-3">
               {cart.map(item => {
                 const hasPromo = item.promoDiscount && item.promoDiscount > 0
-                const originalTotal = item.product.base_price * item.quantity
+                const itemPrice = getItemPrice(item)
+                const originalTotal = itemPrice * item.quantity
                 const discountedTotal = hasPromo 
                   ? originalTotal - (item.promoDiscount! * item.quantity)
                   : originalTotal
                 
                 return (
-                  <div key={item.product.id} className={`rounded-lg p-3 ${hasPromo ? 'bg-green-50 border border-green-200' : 'bg-gray-50'}`}>
+                  <div key={item.cartItemId} className={`rounded-lg p-3 ${hasPromo ? 'bg-green-50 border border-green-200' : 'bg-gray-50'}`}>
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
@@ -869,16 +1116,38 @@ export function POSPage() {
                             </span>
                           )}
                         </div>
+                        {/* Selected Options */}
+                        {item.selectedOptions && item.selectedOptions.length > 0 && (
+                          <div className="text-xs text-blue-600 mt-1">
+                            {item.selectedOptions.map((opt, i) => (
+                              <span key={opt.optionId}>
+                                {i > 0 && ', '}
+                                {opt.optionName}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {/* Selected Addons */}
+                        {item.selectedAddons && item.selectedAddons.length > 0 && (
+                          <div className="text-xs text-orange-600 mt-1">
+                            {item.selectedAddons.map((addon, i) => (
+                              <span key={addon.addonId}>
+                                {i > 0 && ', '}
+                                +{addon.addonName} (${addon.price.toFixed(2)})
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <div className="flex items-center gap-2">
                           {hasPromo ? (
                             <>
-                              <span className="text-sm text-gray-400 line-through">${item.product.base_price.toFixed(2)}</span>
+                              <span className="text-sm text-gray-400 line-through">${itemPrice.toFixed(2)}</span>
                               <span className="text-sm text-green-600 font-medium">
-                                ${(item.product.base_price - item.promoDiscount!).toFixed(2)} each
+                                ${(itemPrice - item.promoDiscount!).toFixed(2)} each
                               </span>
                             </>
                           ) : (
-                            <span className="text-sm text-gray-500">${item.product.base_price.toFixed(2)} each</span>
+                            <span className="text-sm text-gray-500">${itemPrice.toFixed(2)} each</span>
                           )}
                         </div>
                       </div>
@@ -892,7 +1161,7 @@ export function POSPage() {
                           </p>
                         </div>
                         <button
-                          onClick={() => setCart(prev => prev.filter(i => i.product.id !== item.product.id))}
+                          onClick={() => setCart(prev => prev.filter(i => i.cartItemId !== item.cartItemId))}
                           className="text-red-500 hover:text-red-700 hover:bg-red-50 rounded p-1"
                           title="Remove item"
                         >
@@ -903,14 +1172,14 @@ export function POSPage() {
                     <div className="flex items-center gap-2">
                       <div className="flex items-center bg-white rounded-lg border">
                         <button 
-                          onClick={() => updateQuantity(item.product.id, -1)}
+                          onClick={() => updateQuantity(item.cartItemId, -1)}
                           className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded-l-lg"
                         >
                           −
                         </button>
                         <span className="px-3 py-1 font-medium">{item.quantity}</span>
                         <button 
-                          onClick={() => updateQuantity(item.product.id, 1)}
+                          onClick={() => updateQuantity(item.cartItemId, 1)}
                           className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded-r-lg"
                         >
                           +
@@ -920,7 +1189,7 @@ export function POSPage() {
                         type="text"
                         placeholder="Notes..."
                         value={item.notes}
-                        onChange={(e) => updateNotes(item.product.id, e.target.value)}
+                        onChange={(e) => updateNotes(item.cartItemId, e.target.value)}
                         className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1"
                       />
                     </div>
@@ -1159,6 +1428,157 @@ export function POSPage() {
           </button>
         </div>
       </div>
+
+      {/* Product Options Modal */}
+      {showProductModal && selectedProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="sticky top-0 bg-white border-b p-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-800">{selectedProduct.name}</h2>
+                <p className="text-blue-600 font-medium">${selectedProduct.base_price.toFixed(2)}</p>
+              </div>
+              <button
+                onClick={() => { setShowProductModal(false); setSelectedProduct(null) }}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="p-4 space-y-6">
+              {/* Option Groups */}
+              {productOptionGroups.map(group => (
+                <div key={group.id} className="border rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-gray-800">{group.name}</h3>
+                    <span className={`text-xs px-2 py-1 rounded-full ${group.is_required ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {group.is_required ? 'Required' : 'Optional'}
+                      {group.selection_type === 'multiple' && ` (max ${group.max_selections})`}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {group.options.map(option => {
+                      const isSelected = (modalSelectedOptions[group.id] || []).includes(option.id)
+                      return (
+                        <button
+                          key={option.id}
+                          onClick={() => toggleOption(group.id, option.id, group.selection_type, group.max_selections)}
+                          className={`w-full flex items-center justify-between p-3 rounded-lg border transition ${
+                            isSelected 
+                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <span className="font-medium">{option.name}</span>
+                          {group.selection_type === 'single' ? (
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                              isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
+                            }`}>
+                              {isSelected && <div className="w-2 h-2 bg-white rounded-full" />}
+                            </div>
+                          ) : (
+                            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                              isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
+                            }`}>
+                              {isSelected && <span className="text-white text-xs">✓</span>}
+                            </div>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+              
+              {/* Addon Categories */}
+              {productAddonCategories.map(category => (
+                <div key={category.id} className="border rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-gray-800">{category.name}</h3>
+                    <span className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-700">
+                      Extra
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {category.addons.map(addon => {
+                      const isSelected = modalSelectedAddons.includes(addon.id)
+                      return (
+                        <button
+                          key={addon.id}
+                          onClick={() => toggleAddon(addon.id)}
+                          className={`w-full flex items-center justify-between p-3 rounded-lg border transition ${
+                            isSelected 
+                              ? 'border-orange-500 bg-orange-50 text-orange-700' 
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <span className="font-medium">{addon.name}</span>
+                          <div className="flex items-center gap-3">
+                            <span className={isSelected ? 'text-orange-600' : 'text-gray-500'}>+${addon.price.toFixed(2)}</span>
+                            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                              isSelected ? 'border-orange-500 bg-orange-500' : 'border-gray-300'
+                            }`}>
+                              {isSelected && <span className="text-white text-xs">✓</span>}
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+              
+              {/* Quantity and Notes */}
+              <div className="border rounded-lg p-4">
+                <h3 className="font-semibold text-gray-800 mb-3">Quantity & Notes</h3>
+                <div className="flex items-center gap-4 mb-3">
+                  <div className="flex items-center bg-gray-100 rounded-lg">
+                    <button 
+                      onClick={() => setProductQuantity(Math.max(1, productQuantity - 1))}
+                      className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-l-lg text-lg"
+                    >
+                      −
+                    </button>
+                    <span className="px-4 py-2 font-bold text-lg">{productQuantity}</span>
+                    <button 
+                      onClick={() => setProductQuantity(productQuantity + 1)}
+                      className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-r-lg text-lg"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Special instructions..."
+                  value={productNotes}
+                  onChange={(e) => setProductNotes(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2"
+                />
+              </div>
+            </div>
+            
+            {/* Footer */}
+            <div className="sticky bottom-0 bg-white border-t p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-gray-600">Item Total:</span>
+                <span className="text-xl font-bold text-gray-800">
+                  ${((selectedProduct.base_price + getAddonTotal()) * productQuantity).toFixed(2)}
+                </span>
+              </div>
+              <button
+                onClick={addToCartWithOptions}
+                disabled={!canAddToCart()}
+                className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
+              >
+                {canAddToCart() ? 'Add to Cart' : 'Select Required Options'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Customer Search Modal */}
       {showCustomerModal && (
