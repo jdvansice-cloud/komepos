@@ -1227,27 +1227,73 @@ function CategoriesSettings() {
   )
 }
 
-// Products Settings Component
+// Products Settings Component with Sub-tabs
 function ProductsSettings() {
+  const [subTab, setSubTab] = useState<'products' | 'options' | 'addons'>('products')
+  
+  const subTabs = [
+    { id: 'products' as const, label: 'Products', icon: '🍔' },
+    { id: 'options' as const, label: 'Option Groups', icon: '📋' },
+    { id: 'addons' as const, label: 'Addon Categories', icon: '➕' },
+  ]
+
+  return (
+    <div>
+      {/* Sub-tabs */}
+      <div className="flex gap-2 mb-6 border-b">
+        {subTabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setSubTab(tab.id)}
+            className={`px-4 py-2 font-medium transition border-b-2 -mb-px ${
+              subTab === tab.id
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <span className="mr-2">{tab.icon}</span>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {subTab === 'products' && <ProductsList />}
+      {subTab === 'options' && <OptionGroupsList />}
+      {subTab === 'addons' && <AddonCategoriesList />}
+    </div>
+  )
+}
+
+// Products List Sub-component
+function ProductsList() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
+  const [optionGroups, setOptionGroups] = useState<{ id: string; name: string; product_id: string }[]>([])
+  const [addonCategories, setAddonCategories] = useState<{ id: string; name: string }[]>([])
+  const [productAddons, setProductAddons] = useState<{ product_id: string; addon_category_id: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
   const [filter, setFilter] = useState('')
-  const [formData, setFormData] = useState({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: '' })
+  const [formData, setFormData] = useState({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: '', selectedAddonCategories: [] as string[] })
   const [uploading, setUploading] = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
     try {
-      const [productsRes, categoriesRes] = await Promise.all([
+      const [productsRes, categoriesRes, optionGroupsRes, addonCatsRes, productAddonsRes] = await Promise.all([
         supabase.from('products').select('*, category:categories(name)').order('name'),
         supabase.from('categories').select('id, name').order('name'),
+        supabase.from('option_groups').select('id, name, product_id').order('name'),
+        supabase.from('addon_categories').select('id, name').eq('is_active', true).order('name'),
+        supabase.from('product_addons').select('product_id, addon_category_id'),
       ])
       setProducts(productsRes.data || [])
       setCategories(categoriesRes.data || [])
+      setOptionGroups(optionGroupsRes.data || [])
+      setAddonCategories(addonCatsRes.data || [])
+      setProductAddons(productAddonsRes.data || [])
     } catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
   }
@@ -1255,10 +1301,20 @@ function ProductsSettings() {
   function openModal(product?: Product) {
     if (product) {
       setEditing(product)
-      setFormData({ name: product.name, description: product.description || '', base_price: product.base_price, image_url: product.image_url || '', is_taxable: product.is_taxable, is_active: product.is_active, category_id: product.category_id })
+      const productAddonIds = productAddons.filter(pa => pa.product_id === product.id).map(pa => pa.addon_category_id)
+      setFormData({ 
+        name: product.name, 
+        description: product.description || '', 
+        base_price: product.base_price, 
+        image_url: product.image_url || '', 
+        is_taxable: product.is_taxable, 
+        is_active: product.is_active, 
+        category_id: product.category_id,
+        selectedAddonCategories: productAddonIds
+      })
     } else {
       setEditing(null)
-      setFormData({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: categories[0]?.id || '' })
+      setFormData({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: categories[0]?.id || '', selectedAddonCategories: [] })
     }
     setShowModal(true)
   }
@@ -1266,69 +1322,28 @@ function ProductsSettings() {
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-
-    // Validate file type - only PNG and JPG allowed
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png']
-    if (!allowedTypes.includes(file.type)) {
-      alert('Only PNG and JPG images are allowed')
-      e.target.value = '' // Reset input
-      return
-    }
-
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Image must be less than 5MB')
-      e.target.value = ''
-      return
-    }
-
+    if (!allowedTypes.includes(file.type)) { alert('Only PNG and JPG images are allowed'); e.target.value = ''; return }
+    if (file.size > 5 * 1024 * 1024) { alert('Image must be less than 5MB'); e.target.value = ''; return }
     setUploading(true)
     try {
-      // Create unique filename
       const fileExt = file.name.split('.').pop()?.toLowerCase()
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
       const filePath = `products/${fileName}`
-
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from('products')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        })
-
-      if (uploadError) {
-        console.error('Upload error:', uploadError)
-        alert('Failed to upload image. Make sure the "products" storage bucket exists.')
-        return
-      }
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('products')
-        .getPublicUrl(filePath)
-
+      const { error: uploadError } = await supabase.storage.from('products').upload(filePath, file, { cacheControl: '3600', upsert: false })
+      if (uploadError) { console.error('Upload error:', uploadError); alert('Failed to upload image.'); return }
+      const { data: { publicUrl } } = supabase.storage.from('products').getPublicUrl(filePath)
       setFormData({ ...formData, image_url: publicUrl })
-    } catch (error) {
-      console.error('Error uploading:', error)
-      alert('Failed to upload image')
-    } finally {
-      setUploading(false)
-      e.target.value = '' // Reset input for next upload
-    }
+    } catch (error) { console.error('Error uploading:', error); alert('Failed to upload image') }
+    finally { setUploading(false); e.target.value = '' }
   }
 
   async function removeImage() {
-    // If there's an existing image from our storage, try to delete it
     if (formData.image_url && formData.image_url.includes('/storage/v1/object/public/products/')) {
       try {
         const path = formData.image_url.split('/products/')[1]
-        if (path) {
-          await supabase.storage.from('products').remove([`products/${path}`])
-        }
-      } catch (error) {
-        console.error('Error removing old image:', error)
-      }
+        if (path) { await supabase.storage.from('products').remove([`products/${path}`]) }
+      } catch (error) { console.error('Error removing old image:', error) }
     }
     setFormData({ ...formData, image_url: '' })
   }
@@ -1336,12 +1351,32 @@ function ProductsSettings() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     try {
+      const { selectedAddonCategories, ...productData } = formData
+      let productId = editing?.id
+      
       if (editing) {
-        await supabase.from('products').update(formData).eq('id', editing.id)
+        await supabase.from('products').update(productData).eq('id', editing.id)
       } else {
         const { data: company } = await supabase.from('companies').select('id').single()
-        await supabase.from('products').insert({ ...formData, company_id: company?.id })
+        const { data: newProduct } = await supabase.from('products').insert({ ...productData, company_id: company?.id }).select().single()
+        productId = newProduct?.id
       }
+      
+      // Update addon category assignments
+      if (productId) {
+        // Remove existing assignments
+        await supabase.from('product_addons').delete().eq('product_id', productId)
+        // Add new assignments
+        if (selectedAddonCategories.length > 0) {
+          await supabase.from('product_addons').insert(
+            selectedAddonCategories.map(catId => ({ product_id: productId, addon_category_id: catId }))
+          )
+        }
+        // Update has_options flag
+        const hasOptions = optionGroups.some(og => og.product_id === productId) || selectedAddonCategories.length > 0
+        await supabase.from('products').update({ has_options: hasOptions }).eq('id', productId)
+      }
+      
       setShowModal(false)
       fetchData()
     } catch (error) { console.error('Error:', error) }
@@ -1350,6 +1385,15 @@ function ProductsSettings() {
   async function toggleActive(product: Product) {
     await supabase.from('products').update({ is_active: !product.is_active }).eq('id', product.id)
     fetchData()
+  }
+
+  function getProductOptionGroups(productId: string) {
+    return optionGroups.filter(og => og.product_id === productId)
+  }
+
+  function getProductAddonCategories(productId: string) {
+    const addonIds = productAddons.filter(pa => pa.product_id === productId).map(pa => pa.addon_category_id)
+    return addonCategories.filter(ac => addonIds.includes(ac.id))
   }
 
   const filteredProducts = products.filter(p => p.name.toLowerCase().includes(filter.toLowerCase()) || p.category?.name?.toLowerCase().includes(filter.toLowerCase()))
@@ -1374,30 +1418,46 @@ function ProductsSettings() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Options/Addons</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {filteredProducts.map(product => (
-              <tr key={product.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-3">
-                    {product.image_url ? <img src={product.image_url} alt="" className="w-10 h-10 rounded-lg object-cover" /> : <div className="w-10 h-10 bg-gray-200 rounded-lg flex items-center justify-center">🍽️</div>}
-                    <span className="font-medium text-gray-800">{product.name}</span>
-                  </div>
-                </td>
-                <td className="px-6 py-4 text-gray-600">{product.category?.name}</td>
-                <td className="px-6 py-4 font-medium">${product.base_price.toFixed(2)}</td>
-                <td className="px-6 py-4">
-                  <span className={`px-2 py-1 rounded-full text-xs ${product.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{product.is_active ? 'Active' : 'Inactive'}</span>
-                </td>
-                <td className="px-6 py-4 text-right">
-                  <button onClick={() => openModal(product)} className="text-blue-600 hover:text-blue-800 mr-3">Edit</button>
-                  <button onClick={() => toggleActive(product)} className="text-gray-600 hover:text-gray-800">{product.is_active ? 'Disable' : 'Enable'}</button>
-                </td>
-              </tr>
-            ))}
+            {filteredProducts.map(product => {
+              const prodOptGroups = getProductOptionGroups(product.id)
+              const prodAddonCats = getProductAddonCategories(product.id)
+              return (
+                <tr key={product.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      {product.image_url ? <img src={product.image_url} alt="" className="w-10 h-10 rounded-lg object-cover" /> : <div className="w-10 h-10 bg-gray-200 rounded-lg flex items-center justify-center">🍽️</div>}
+                      <span className="font-medium text-gray-800">{product.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-gray-600">{product.category?.name}</td>
+                  <td className="px-6 py-4 font-medium">${product.base_price.toFixed(2)}</td>
+                  <td className="px-6 py-4">
+                    <div className="flex flex-wrap gap-1">
+                      {prodOptGroups.map(og => (
+                        <span key={og.id} className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded">{og.name}</span>
+                      ))}
+                      {prodAddonCats.map(ac => (
+                        <span key={ac.id} className="px-2 py-0.5 bg-orange-100 text-orange-700 text-xs rounded">{ac.name}</span>
+                      ))}
+                      {prodOptGroups.length === 0 && prodAddonCats.length === 0 && <span className="text-gray-400 text-xs">None</span>}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={`px-2 py-1 rounded-full text-xs ${product.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{product.is_active ? 'Active' : 'Inactive'}</span>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <button onClick={() => openModal(product)} className="text-blue-600 hover:text-blue-800 mr-3">Edit</button>
+                    <button onClick={() => toggleActive(product)} className="text-gray-600 hover:text-gray-800">{product.is_active ? 'Disable' : 'Enable'}</button>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
         {filteredProducts.length === 0 && <p className="text-gray-500 text-center py-8">No products found</p>}
@@ -1405,59 +1465,63 @@ function ProductsSettings() {
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">{editing ? 'Edit Product' : 'Add Product'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Category *</label><select value={formData.category_id} onChange={(e) => setFormData({ ...formData, category_id: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required><option value="">Select category</option>{categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></div>
+              </div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" rows={2} /></div>
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Price *</label><input type="number" step="0.01" min="0" value={formData.base_price} onChange={(e) => setFormData({ ...formData, base_price: parseFloat(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required /></div>
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Category *</label><select value={formData.category_id} onChange={(e) => setFormData({ ...formData, category_id: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required><option value="">Select category</option>{categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Product Image</label>
+                  {formData.image_url ? (
+                    <div className="relative inline-block">
+                      <img src={formData.image_url} alt="Product preview" className="w-16 h-16 object-cover rounded-lg border" />
+                      <button type="button" onClick={removeImage} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600">×</button>
+                    </div>
+                  ) : (
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-2 text-center">
+                      <input type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onChange={handleImageUpload} disabled={uploading} className="hidden" id="product-image-upload" />
+                      <label htmlFor="product-image-upload" className={`cursor-pointer text-sm ${uploading ? 'opacity-50' : ''}`}>
+                        {uploading ? 'Uploading...' : '📷 Upload'}
+                      </label>
+                    </div>
+                  )}
+                </div>
               </div>
               
-              {/* Image Upload Section */}
+              {/* Addon Categories Assignment */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Product Image</label>
-                {formData.image_url ? (
-                  <div className="relative inline-block">
-                    <img src={formData.image_url} alt="Product preview" className="w-32 h-32 object-cover rounded-lg border" />
-                    <button
-                      type="button"
-                      onClick={removeImage}
-                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm hover:bg-red-600"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ) : (
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
-                    <input
-                      type="file"
-                      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                      onChange={handleImageUpload}
-                      disabled={uploading}
-                      className="hidden"
-                      id="product-image-upload"
-                    />
-                    <label
-                      htmlFor="product-image-upload"
-                      className={`cursor-pointer ${uploading ? 'opacity-50' : ''}`}
-                    >
-                      {uploading ? (
-                        <div className="flex items-center justify-center gap-2">
-                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                          <span className="text-gray-600">Uploading...</span>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="text-3xl mb-2">📷</div>
-                          <p className="text-sm text-gray-600">Click to upload image</p>
-                          <p className="text-xs text-gray-400 mt-1">Max 5MB, JPG/PNG only</p>
-                        </>
-                      )}
-                    </label>
-                  </div>
-                )}
+                <label className="block text-sm font-medium text-gray-700 mb-2">Addon Categories (items that add to price)</label>
+                <div className="border rounded-lg p-3 max-h-32 overflow-y-auto bg-gray-50">
+                  {addonCategories.length === 0 ? (
+                    <p className="text-gray-400 text-sm">No addon categories created yet. Go to "Addon Categories" tab to create some.</p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      {addonCategories.map(cat => (
+                        <label key={cat.id} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.selectedAddonCategories.includes(cat.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFormData({ ...formData, selectedAddonCategories: [...formData.selectedAddonCategories, cat.id] })
+                              } else {
+                                setFormData({ ...formData, selectedAddonCategories: formData.selectedAddonCategories.filter(id => id !== cat.id) })
+                              }
+                            }}
+                            className="rounded text-orange-600"
+                          />
+                          <span className="text-sm">{cat.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Option Groups are assigned directly to products in the "Option Groups" tab</p>
               </div>
 
               <div className="flex gap-4">
@@ -1467,6 +1531,533 @@ function ProductsSettings() {
               <div className="flex justify-end gap-2 pt-4">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
                 <button type="submit" disabled={uploading} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{editing ? 'Save' : 'Add'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Option Groups List Sub-component
+interface OptionGroupFull { id: string; name: string; product_id: string; selection_type: 'single' | 'multiple'; min_selections: number; max_selections: number; is_required: boolean; sort_order: number; product?: { name: string }; options: OptionItem[] }
+interface OptionItem { id: string; name: string; is_default: boolean; is_available: boolean; sort_order: number }
+
+function OptionGroupsList() {
+  const [optionGroups, setOptionGroups] = useState<OptionGroupFull[]>([])
+  const [products, setProducts] = useState<{ id: string; name: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [editing, setEditing] = useState<OptionGroupFull | null>(null)
+  const [formData, setFormData] = useState({ name: '', product_id: '', selection_type: 'single' as 'single' | 'multiple', min_selections: 1, max_selections: 1, is_required: true })
+  const [options, setOptions] = useState<{ id?: string; name: string; is_default: boolean; is_available: boolean; sort_order: number }[]>([])
+
+  useEffect(() => { fetchData() }, [])
+
+  async function fetchData() {
+    try {
+      const [groupsRes, productsRes, optionsRes] = await Promise.all([
+        supabase.from('option_groups').select('*, product:products(name)').order('name'),
+        supabase.from('products').select('id, name').eq('is_active', true).order('name'),
+        supabase.from('options').select('*').order('sort_order'),
+      ])
+      
+      const groups = (groupsRes.data || []).map(g => ({
+        ...g,
+        options: (optionsRes.data || []).filter(o => o.option_group_id === g.id)
+      }))
+      
+      setOptionGroups(groups)
+      setProducts(productsRes.data || [])
+    } catch (error) { console.error('Error:', error) }
+    finally { setLoading(false) }
+  }
+
+  function openModal(group?: OptionGroupFull) {
+    if (group) {
+      setEditing(group)
+      setFormData({ 
+        name: group.name, 
+        product_id: group.product_id, 
+        selection_type: group.selection_type,
+        min_selections: group.min_selections,
+        max_selections: group.max_selections,
+        is_required: group.is_required
+      })
+      setOptions(group.options.map(o => ({ id: o.id, name: o.name, is_default: o.is_default, is_available: o.is_available, sort_order: o.sort_order })))
+    } else {
+      setEditing(null)
+      setFormData({ name: '', product_id: products[0]?.id || '', selection_type: 'single', min_selections: 1, max_selections: 1, is_required: true })
+      setOptions([{ name: '', is_default: true, is_available: true, sort_order: 0 }])
+    }
+    setShowModal(true)
+  }
+
+  function addOption() {
+    setOptions([...options, { name: '', is_default: false, is_available: true, sort_order: options.length }])
+  }
+
+  function removeOption(index: number) {
+    if (options.length <= 1) return
+    const newOptions = options.filter((_, i) => i !== index)
+    // If we removed the default, make first one default
+    if (options[index].is_default && newOptions.length > 0) {
+      newOptions[0].is_default = true
+    }
+    setOptions(newOptions)
+  }
+
+  function updateOption(index: number, field: string, value: any) {
+    const newOptions = [...options]
+    if (field === 'is_default' && value && formData.selection_type === 'single') {
+      // For single selection, only one can be default
+      newOptions.forEach((o, i) => o.is_default = i === index)
+    } else {
+      (newOptions[index] as any)[field] = value
+    }
+    setOptions(newOptions)
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (options.filter(o => o.name.trim()).length === 0) {
+      alert('Please add at least one option')
+      return
+    }
+    
+    try {
+      let groupId = editing?.id
+      
+      if (editing) {
+        await supabase.from('option_groups').update(formData).eq('id', editing.id)
+      } else {
+        const { data: newGroup } = await supabase.from('option_groups').insert(formData).select().single()
+        groupId = newGroup?.id
+      }
+      
+      if (groupId) {
+        // Delete existing options
+        await supabase.from('options').delete().eq('option_group_id', groupId)
+        
+        // Insert new options
+        const validOptions = options.filter(o => o.name.trim())
+        if (validOptions.length > 0) {
+          await supabase.from('options').insert(
+            validOptions.map((o, i) => ({
+              option_group_id: groupId,
+              name: o.name.trim(),
+              is_default: o.is_default,
+              is_available: o.is_available,
+              sort_order: i
+            }))
+          )
+        }
+        
+        // Update product has_options flag
+        const { data: productAddons } = await supabase.from('product_addons').select('product_id').eq('product_id', formData.product_id)
+        const { data: productGroups } = await supabase.from('option_groups').select('id').eq('product_id', formData.product_id)
+        const hasOptions = (productAddons?.length || 0) > 0 || (productGroups?.length || 0) > 0
+        await supabase.from('products').update({ has_options: hasOptions }).eq('id', formData.product_id)
+      }
+      
+      setShowModal(false)
+      fetchData()
+    } catch (error) { console.error('Error:', error); alert('Error saving option group') }
+  }
+
+  async function deleteGroup(group: OptionGroupFull) {
+    if (!confirm(`Delete option group "${group.name}" and all its options?`)) return
+    try {
+      await supabase.from('options').delete().eq('option_group_id', group.id)
+      await supabase.from('option_groups').delete().eq('id', group.id)
+      
+      // Update product has_options flag
+      const { data: productAddons } = await supabase.from('product_addons').select('product_id').eq('product_id', group.product_id)
+      const { data: productGroups } = await supabase.from('option_groups').select('id').eq('product_id', group.product_id)
+      const hasOptions = (productAddons?.length || 0) > 0 || ((productGroups?.length || 0) - 1) > 0
+      await supabase.from('products').update({ has_options: hasOptions }).eq('id', group.product_id)
+      
+      fetchData()
+    } catch (error) { console.error('Error:', error) }
+  }
+
+  if (loading) return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-800">Option Groups</h2>
+          <p className="text-sm text-gray-500">Options are included in price (e.g., Choose your drink, Choose your sauce)</p>
+        </div>
+        <button onClick={() => openModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ Add Option Group</button>
+      </div>
+
+      <div className="space-y-4">
+        {optionGroups.length === 0 ? (
+          <div className="bg-gray-50 rounded-lg p-8 text-center text-gray-500">
+            No option groups created yet. Click "Add Option Group" to create one.
+          </div>
+        ) : (
+          optionGroups.map(group => (
+            <div key={group.id} className="bg-white rounded-lg shadow p-4">
+              <div className="flex justify-between items-start mb-3">
+                <div>
+                  <h3 className="font-semibold text-gray-800">{group.name}</h3>
+                  <p className="text-sm text-gray-500">
+                    Product: <span className="font-medium">{group.product?.name}</span> • 
+                    {group.selection_type === 'single' ? ' Single selection (•)' : ' Multiple selection (☑)'} • 
+                    {group.is_required ? ' Required' : ' Optional'}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => openModal(group)} className="text-blue-600 hover:text-blue-800 text-sm">Edit</button>
+                  <button onClick={() => deleteGroup(group)} className="text-red-600 hover:text-red-800 text-sm">Delete</button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {group.options.map(opt => (
+                  <span key={opt.id} className={`px-3 py-1 rounded-full text-sm ${opt.is_default ? 'bg-blue-100 text-blue-700 font-medium' : 'bg-gray-100 text-gray-600'} ${!opt.is_available ? 'opacity-50 line-through' : ''}`}>
+                    {group.selection_type === 'single' ? '○' : '☐'} {opt.name} {opt.is_default && '(default)'}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">{editing ? 'Edit Option Group' : 'Add Option Group'}</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Group Name *</label>
+                  <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="e.g., Choose Your Drink" required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Product *</label>
+                  <select value={formData.product_id} onChange={(e) => setFormData({ ...formData, product_id: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required>
+                    <option value="">Select product</option>
+                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Selection Type</label>
+                  <select value={formData.selection_type} onChange={(e) => setFormData({ ...formData, selection_type: e.target.value as 'single' | 'multiple' })} className="w-full border border-gray-300 rounded-lg px-4 py-2">
+                    <option value="single">Single (• bullets)</option>
+                    <option value="multiple">Multiple (☑ checks)</option>
+                  </select>
+                </div>
+                {formData.selection_type === 'multiple' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Min Selections</label>
+                      <input type="number" min="0" value={formData.min_selections} onChange={(e) => setFormData({ ...formData, min_selections: parseInt(e.target.value) || 0 })} className="w-full border border-gray-300 rounded-lg px-4 py-2" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Max Selections</label>
+                      <input type="number" min="1" value={formData.max_selections} onChange={(e) => setFormData({ ...formData, max_selections: parseInt(e.target.value) || 1 })} className="w-full border border-gray-300 rounded-lg px-4 py-2" />
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={formData.is_required} onChange={(e) => setFormData({ ...formData, is_required: e.target.checked })} className="rounded" />
+                <span className="text-sm">Required (customer must make a selection)</span>
+              </label>
+
+              {/* Options List */}
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Options (no extra charge)</label>
+                  <button type="button" onClick={addOption} className="text-blue-600 hover:text-blue-800 text-sm">+ Add Option</button>
+                </div>
+                <div className="space-y-2 border rounded-lg p-3 bg-gray-50">
+                  {options.map((opt, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={opt.name}
+                        onChange={(e) => updateOption(index, 'name', e.target.value)}
+                        placeholder="Option name (e.g., Coca-Cola)"
+                        className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm"
+                      />
+                      <label className="flex items-center gap-1 text-xs">
+                        <input
+                          type={formData.selection_type === 'single' ? 'radio' : 'checkbox'}
+                          name="default-option"
+                          checked={opt.is_default}
+                          onChange={(e) => updateOption(index, 'is_default', e.target.checked)}
+                          className="rounded"
+                        />
+                        Default
+                      </label>
+                      <label className="flex items-center gap-1 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={opt.is_available}
+                          onChange={(e) => updateOption(index, 'is_available', e.target.checked)}
+                          className="rounded"
+                        />
+                        Available
+                      </label>
+                      <button type="button" onClick={() => removeOption(index)} className="text-red-500 hover:text-red-700 text-lg" disabled={options.length <= 1}>×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Addon Categories List Sub-component
+interface AddonCategoryFull { id: string; name: string; description: string; sort_order: number; is_active: boolean; addons: AddonItem[] }
+interface AddonItem { id: string; name: string; price: number; is_available: boolean; sort_order: number }
+
+function AddonCategoriesList() {
+  const [addonCategories, setAddonCategories] = useState<AddonCategoryFull[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [editing, setEditing] = useState<AddonCategoryFull | null>(null)
+  const [formData, setFormData] = useState({ name: '', description: '', is_active: true })
+  const [addons, setAddons] = useState<{ id?: string; name: string; price: number; is_available: boolean; sort_order: number }[]>([])
+
+  useEffect(() => { fetchData() }, [])
+
+  async function fetchData() {
+    try {
+      const [catsRes, addonsRes] = await Promise.all([
+        supabase.from('addon_categories').select('*').order('sort_order'),
+        supabase.from('addons').select('*').order('sort_order'),
+      ])
+      
+      const cats = (catsRes.data || []).map(c => ({
+        ...c,
+        addons: (addonsRes.data || []).filter(a => a.addon_category_id === c.id)
+      }))
+      
+      setAddonCategories(cats)
+    } catch (error) { console.error('Error:', error) }
+    finally { setLoading(false) }
+  }
+
+  function openModal(cat?: AddonCategoryFull) {
+    if (cat) {
+      setEditing(cat)
+      setFormData({ name: cat.name, description: cat.description || '', is_active: cat.is_active })
+      setAddons(cat.addons.map(a => ({ id: a.id, name: a.name, price: a.price, is_available: a.is_available, sort_order: a.sort_order })))
+    } else {
+      setEditing(null)
+      setFormData({ name: '', description: '', is_active: true })
+      setAddons([{ name: '', price: 0, is_available: true, sort_order: 0 }])
+    }
+    setShowModal(true)
+  }
+
+  function addAddon() {
+    setAddons([...addons, { name: '', price: 0, is_available: true, sort_order: addons.length }])
+  }
+
+  function removeAddon(index: number) {
+    if (addons.length <= 1) return
+    setAddons(addons.filter((_, i) => i !== index))
+  }
+
+  function updateAddon(index: number, field: string, value: any) {
+    const newAddons = [...addons]
+    ;(newAddons[index] as any)[field] = value
+    setAddons(newAddons)
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (addons.filter(a => a.name.trim()).length === 0) {
+      alert('Please add at least one addon item')
+      return
+    }
+    
+    try {
+      let catId = editing?.id
+      const { data: company } = await supabase.from('companies').select('id').single()
+      
+      if (editing) {
+        await supabase.from('addon_categories').update(formData).eq('id', editing.id)
+      } else {
+        const { data: newCat } = await supabase.from('addon_categories').insert({ ...formData, company_id: company?.id, sort_order: addonCategories.length }).select().single()
+        catId = newCat?.id
+      }
+      
+      if (catId) {
+        // Delete existing addons
+        await supabase.from('addons').delete().eq('addon_category_id', catId)
+        
+        // Insert new addons
+        const validAddons = addons.filter(a => a.name.trim())
+        if (validAddons.length > 0) {
+          await supabase.from('addons').insert(
+            validAddons.map((a, i) => ({
+              addon_category_id: catId,
+              name: a.name.trim(),
+              price: a.price || 0,
+              is_available: a.is_available,
+              sort_order: i
+            }))
+          )
+        }
+      }
+      
+      setShowModal(false)
+      fetchData()
+    } catch (error) { console.error('Error:', error); alert('Error saving addon category') }
+  }
+
+  async function deleteCategory(cat: AddonCategoryFull) {
+    if (!confirm(`Delete addon category "${cat.name}" and all its items? This will also remove it from all products.`)) return
+    try {
+      // Remove from product_addons
+      await supabase.from('product_addons').delete().eq('addon_category_id', cat.id)
+      // Delete addons
+      await supabase.from('addons').delete().eq('addon_category_id', cat.id)
+      // Delete category
+      await supabase.from('addon_categories').delete().eq('id', cat.id)
+      fetchData()
+    } catch (error) { console.error('Error:', error) }
+  }
+
+  async function toggleActive(cat: AddonCategoryFull) {
+    await supabase.from('addon_categories').update({ is_active: !cat.is_active }).eq('id', cat.id)
+    fetchData()
+  }
+
+  if (loading) return <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-800">Addon Categories</h2>
+          <p className="text-sm text-gray-500">Addons add extra cost (e.g., Extra protein, Extra toppings)</p>
+        </div>
+        <button onClick={() => openModal()} className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700">+ Add Addon Category</button>
+      </div>
+
+      <div className="space-y-4">
+        {addonCategories.length === 0 ? (
+          <div className="bg-gray-50 rounded-lg p-8 text-center text-gray-500">
+            No addon categories created yet. Click "Add Addon Category" to create one.
+          </div>
+        ) : (
+          addonCategories.map(cat => (
+            <div key={cat.id} className={`bg-white rounded-lg shadow p-4 ${!cat.is_active ? 'opacity-60' : ''}`}>
+              <div className="flex justify-between items-start mb-3">
+                <div>
+                  <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                    {cat.name}
+                    {!cat.is_active && <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">Inactive</span>}
+                  </h3>
+                  {cat.description && <p className="text-sm text-gray-500">{cat.description}</p>}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => openModal(cat)} className="text-blue-600 hover:text-blue-800 text-sm">Edit</button>
+                  <button onClick={() => toggleActive(cat)} className="text-gray-600 hover:text-gray-800 text-sm">{cat.is_active ? 'Disable' : 'Enable'}</button>
+                  <button onClick={() => deleteCategory(cat)} className="text-red-600 hover:text-red-800 text-sm">Delete</button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {cat.addons.map(addon => (
+                  <span key={addon.id} className={`px-3 py-1 rounded-full text-sm bg-orange-100 text-orange-700 ${!addon.is_available ? 'opacity-50 line-through' : ''}`}>
+                    ☐ {addon.name} <span className="font-semibold">+${addon.price.toFixed(2)}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">{editing ? 'Edit Addon Category' : 'Add Addon Category'}</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Category Name *</label>
+                <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="e.g., Extra Protein" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <input type="text" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="e.g., Add extra meat to your order" />
+              </div>
+
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} className="rounded" />
+                <span className="text-sm">Active (available for assignment to products)</span>
+              </label>
+
+              {/* Addons List */}
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Addon Items (with prices)</label>
+                  <button type="button" onClick={addAddon} className="text-orange-600 hover:text-orange-800 text-sm">+ Add Item</button>
+                </div>
+                <div className="space-y-2 border rounded-lg p-3 bg-orange-50">
+                  {addons.map((addon, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={addon.name}
+                        onChange={(e) => updateAddon(index, 'name', e.target.value)}
+                        placeholder="Item name (e.g., Extra Patty)"
+                        className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm"
+                      />
+                      <div className="flex items-center gap-1">
+                        <span className="text-gray-500 text-sm">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={addon.price}
+                          onChange={(e) => updateAddon(index, 'price', parseFloat(e.target.value) || 0)}
+                          className="w-20 border border-gray-300 rounded px-2 py-1.5 text-sm"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <label className="flex items-center gap-1 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={addon.is_available}
+                          onChange={(e) => updateAddon(index, 'is_available', e.target.checked)}
+                          className="rounded"
+                        />
+                        Available
+                      </label>
+                      <button type="button" onClick={() => removeAddon(index)} className="text-red-500 hover:text-red-700 text-lg" disabled={addons.length <= 1}>×</button>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Prices will be displayed to customers when selecting addons</p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700">Save</button>
               </div>
             </form>
           </div>
