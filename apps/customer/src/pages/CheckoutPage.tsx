@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
+import { haptics } from '../lib/haptics'
 
 export function CheckoutPage() {
   const { items, total, clearCart } = useCart()
@@ -92,27 +93,27 @@ export function CheckoutPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-32">
-      <header className="bg-red-600 text-white p-4 sticky top-0 z-10">
-        <Link to="/cart" className="text-xl font-bold">← Checkout</Link>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="bg-red-600 text-white p-4 flex-shrink-0 header-safe">
+        <Link to="/cart" className="text-xl font-bold btn-press">← Checkout</Link>
       </header>
 
-      <div className="p-4 space-y-6">
+      <div className="flex-1 overflow-y-auto scroll-momentum p-4 space-y-4">
         {/* Order Type */}
         <div className="bg-white rounded-lg shadow p-4">
           <h2 className="font-semibold text-gray-800 mb-3">Order Type</h2>
-          <div className="flex gap-4">
+          <div className="flex gap-3">
             <button
-              onClick={() => setOrderType('delivery')}
-              className={`flex-1 py-3 rounded-lg font-semibold transition ${
+              onClick={() => { haptics.tap(); setOrderType('delivery') }}
+              className={`flex-1 py-3 rounded-lg font-semibold transition btn-press ${
                 orderType === 'delivery' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'
               }`}
             >
               🚗 Delivery
             </button>
             <button
-              onClick={() => setOrderType('takeout')}
-              className={`flex-1 py-3 rounded-lg font-semibold transition ${
+              onClick={() => { haptics.tap(); setOrderType('takeout') }}
+              className={`flex-1 py-3 rounded-lg font-semibold transition btn-press ${
                 orderType === 'takeout' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'
               }`}
             >
@@ -197,14 +198,17 @@ export function CheckoutPage() {
             </div>
           </div>
         </div>
+        
+        {/* Spacer for footer */}
+        <div className="h-24"></div>
       </div>
 
       {/* Place Order Footer */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 shadow-lg">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 shadow-lg bottom-nav">
         <button
-          onClick={handlePlaceOrder}
+          onClick={() => { haptics.tap(); handlePlaceOrder() }}
           disabled={loading}
-          className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-red-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg active:bg-red-700 transition disabled:opacity-50 flex items-center justify-center gap-2 btn-press"
         >
           {loading ? (
             <>

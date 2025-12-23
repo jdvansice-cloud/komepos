@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { haptics } from '../lib/haptics'
 
 interface Option {
   id: string
@@ -70,6 +71,13 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
   const [loading, setLoading] = useState(true)
   const [errors, setErrors] = useState<string[]>([])
   const [showImageZoom, setShowImageZoom] = useState(false)
+  const [scrolled, setScrolled] = useState(false)
+
+  // Track scroll to collapse image
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const scrollTop = e.currentTarget.scrollTop
+    setScrolled(scrollTop > 80)
+  }
 
   useEffect(() => {
     fetchProductDetails()
@@ -148,6 +156,7 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
   }
 
   function handleOptionChange(groupId: string, optionId: string, selectionType: 'single' | 'multiple') {
+    haptics.tap()
     setSelectedOptions(prev => {
       if (selectionType === 'single') {
         return { ...prev, [groupId]: [optionId] }
@@ -164,6 +173,7 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
   }
 
   function handleAddonChange(addonId: string, delta: number) {
+    haptics.tap()
     setSelectedAddons(prev => {
       const current = prev[addonId] || 0
       const newValue = Math.max(0, current + delta)
@@ -176,7 +186,7 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
   }
 
   function toggleAddonCategory(categoryId: string) {
-    // Only one can be open at a time - toggle off if clicking the same one
+    haptics.tap()
     setExpandedAddonId(prev => prev === categoryId ? null : categoryId)
   }
 
@@ -266,46 +276,66 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
 
   return (
     <div className="fixed inset-0 z-50 bg-white flex flex-col">
-      {/* Product Image Header - 50% height with cropped view */}
-      <div className="relative h-[35vh] flex-shrink-0 overflow-hidden">
-        {product.image_url ? (
-          <img 
-            src={product.image_url} 
-            alt={product.name}
-            className="w-full h-[50vh] object-cover"
-          />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center">
-            <span className="text-6xl">🍽️</span>
-          </div>
-        )}
-        {/* Back button */}
-        <button
-          onClick={onClose}
-          className="absolute top-3 left-3 w-9 h-9 bg-white/90 backdrop-blur rounded-full flex items-center justify-center shadow-lg hover:bg-white transition"
-        >
-          <span className="text-gray-600 text-lg">←</span>
-        </button>
-        {/* Zoom button */}
-        {product.image_url && (
+      {/* Sticky Header - shows when scrolled */}
+      <div className={`sticky top-0 z-20 bg-white border-b transition-all duration-200 ${scrolled ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className="flex items-center gap-3 px-4 py-2">
           <button
-            onClick={() => setShowImageZoom(true)}
-            className="absolute top-3 right-3 w-9 h-9 bg-white/90 backdrop-blur rounded-full flex items-center justify-center shadow-lg hover:bg-white transition"
+            onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center text-gray-600"
           >
-            <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-            </svg>
+            ←
           </button>
-        )}
+          <div className="flex-1 min-w-0">
+            <h2 className="font-bold text-gray-800 truncate">{product.name}</h2>
+          </div>
+          <span className="text-red-600 font-bold">${product.base_price.toFixed(2)}</span>
+        </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Product Info - more compact */}
-        <div className="px-4 py-3 border-b">
-          <h2 className="text-lg font-bold text-gray-800">{product.name}</h2>
-          <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">{product.description}</p>
-          <p className="text-red-600 font-bold text-lg mt-1">${product.base_price.toFixed(2)}</p>
+      {/* Scrollable Content */}
+      <div className="flex-1 overflow-y-auto" onScroll={handleScroll}>
+        {/* Product Image - smaller, collapses on scroll */}
+        <div className={`relative transition-all duration-200 ${scrolled ? 'h-0 overflow-hidden' : 'h-[25vh]'}`}>
+          {product.image_url ? (
+            <img 
+              src={product.image_url} 
+              alt={product.name}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center">
+              <span className="text-5xl">🍽️</span>
+            </div>
+          )}
+          {/* Back button - only visible when not scrolled */}
+          <button
+            onClick={onClose}
+            className={`absolute top-3 left-3 w-9 h-9 bg-white/90 backdrop-blur rounded-full flex items-center justify-center shadow-lg transition-opacity ${scrolled ? 'opacity-0' : 'opacity-100'}`}
+          >
+            <span className="text-gray-600 text-lg">←</span>
+          </button>
+          {/* Zoom button */}
+          {product.image_url && (
+            <button
+              onClick={() => setShowImageZoom(true)}
+              className={`absolute top-3 right-3 w-9 h-9 bg-white/90 backdrop-blur rounded-full flex items-center justify-center shadow-lg transition-opacity ${scrolled ? 'opacity-0' : 'opacity-100'}`}
+            >
+              <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Product Info - visible when not scrolled */}
+        <div className={`px-4 py-2 border-b bg-white ${scrolled ? 'hidden' : ''}`}>
+          <div className="flex justify-between items-start gap-2">
+            <h2 className="text-lg font-bold text-gray-800 flex-1">{product.name}</h2>
+            <span className="text-red-600 font-bold text-lg">${product.base_price.toFixed(2)}</span>
+          </div>
+          {product.description && (
+            <p className="text-sm text-gray-500 mt-1 line-clamp-2">{product.description}</p>
+          )}
         </div>
 
         {loading ? (
@@ -316,47 +346,41 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
           <>
             {/* Validation Errors */}
             {errors.length > 0 && (
-              <div className="mx-4 mt-3 p-2.5 bg-red-50 border border-red-200 rounded-lg">
+              <div className="mx-3 mt-2 p-2 bg-red-50 border border-red-200 rounded-lg">
                 {errors.map((error, i) => (
-                  <p key={i} className="text-red-600 text-sm">{error}</p>
+                  <p key={i} className="text-red-600 text-xs">{error}</p>
                 ))}
               </div>
             )}
 
             {/* Option Groups - compact */}
             {optionGroups.map(group => (
-              <div key={group.id} className="px-4 py-3 border-b">
-                <div className="flex justify-between items-center mb-2">
-                  <div>
-                    <h3 className="font-semibold text-gray-800 text-sm">{group.name}</h3>
-                    <p className="text-xs text-gray-500">
-                      {group.selection_type === 'single' 
-                        ? 'Choose 1' 
-                        : `Choose ${group.min_selections}-${group.max_selections}`}
-                      {group.is_required && <span className="text-red-500 ml-1">• Required</span>}
-                    </p>
-                  </div>
+              <div key={group.id} className="px-3 py-2 border-b">
+                <div className="flex justify-between items-center mb-1.5">
+                  <h3 className="font-semibold text-gray-800 text-sm">{group.name}</h3>
+                  <span className="text-xs text-gray-500">
+                    {group.selection_type === 'single' ? 'Choose 1' : `${group.min_selections}-${group.max_selections}`}
+                    {group.is_required && <span className="text-red-500 ml-1">*</span>}
+                  </span>
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   {group.options.filter(o => o.is_available).map(option => {
                     const isSelected = (selectedOptions[group.id] || []).includes(option.id)
                     return (
                       <button
                         key={option.id}
                         onClick={() => handleOptionChange(group.id, option.id, group.selection_type)}
-                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition ${
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border transition ${
                           isSelected 
                             ? 'border-red-500 bg-red-50' 
-                            : 'border-gray-200 hover:border-gray-300'
+                            : 'border-gray-200 active:bg-gray-50'
                         }`}
                       >
                         <span className={`text-sm ${isSelected ? 'text-red-700 font-medium' : 'text-gray-700'}`}>
                           {option.name}
                         </span>
                         <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
-                          isSelected 
-                            ? 'border-red-500 bg-red-500' 
-                            : 'border-gray-300'
+                          isSelected ? 'border-red-500 bg-red-500' : 'border-gray-300'
                         }`}>
                           {isSelected && (
                             <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -371,43 +395,36 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
               </div>
             ))}
 
-            {/* Addon Categories - Collapsible Accordion - compact */}
+            {/* Addon Categories - Collapsible */}
             {addonCategories.map(category => {
               const isExpanded = expandedAddonId === category.id
               const selectedCount = getSelectedAddonsCount(category)
               
               return (
                 <div key={category.id} className="border-b">
-                  {/* Accordion Header */}
                   <button
                     onClick={() => toggleAddonCategory(category.id)}
-                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition"
+                    className="w-full px-3 py-2 flex items-center justify-between active:bg-gray-50"
                   >
-                    <div className="text-left">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-gray-800 text-sm">{category.name}</h3>
-                        {selectedCount > 0 && (
-                          <span className="bg-red-100 text-red-600 text-xs font-medium px-1.5 py-0.5 rounded-full">
-                            {selectedCount}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-400">Optional</p>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-gray-800 text-sm">{category.name}</h3>
+                      {selectedCount > 0 && (
+                        <span className="bg-red-500 text-white text-xs font-medium w-5 h-5 rounded-full flex items-center justify-center">
+                          {selectedCount}
+                        </span>
+                      )}
                     </div>
-                    <span className={`text-gray-400 text-sm transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
-                      ▼
-                    </span>
+                    <span className={`text-gray-400 text-xs transition-transform ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
                   </button>
                   
-                  {/* Accordion Content */}
                   {isExpanded && (
-                    <div className="px-4 pb-3 space-y-1.5">
+                    <div className="px-3 pb-2 space-y-1">
                       {category.addons.map(addon => {
                         const qty = selectedAddons[addon.id] || 0
                         return (
                           <div
                             key={addon.id}
-                            className={`flex items-center justify-between px-3 py-2 rounded-lg border transition ${
+                            className={`flex items-center justify-between px-3 py-1.5 rounded-lg border ${
                               qty > 0 ? 'border-red-500 bg-red-50' : 'border-gray-200'
                             }`}
                           >
@@ -415,32 +432,26 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
                               <span className={`text-sm ${qty > 0 ? 'text-red-700 font-medium' : 'text-gray-700'}`}>
                                 {addon.name}
                               </span>
-                              <span className="text-red-600 text-xs ml-1.5">+${addon.price.toFixed(2)}</span>
+                              <span className="text-red-600 text-xs ml-1">+${addon.price.toFixed(2)}</span>
                             </div>
-                            <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
                               {qty > 0 ? (
                                 <>
                                   <button
                                     onClick={() => handleAddonChange(addon.id, -1)}
-                                    className="w-7 h-7 rounded-full bg-red-100 text-red-600 flex items-center justify-center hover:bg-red-200 transition text-sm"
-                                  >
-                                    −
-                                  </button>
-                                  <span className="w-5 text-center font-semibold text-gray-800 text-sm">{qty}</span>
+                                    className="w-7 h-7 rounded-full bg-red-100 text-red-600 flex items-center justify-center active:bg-red-200"
+                                  >−</button>
+                                  <span className="w-4 text-center font-semibold text-sm">{qty}</span>
                                   <button
                                     onClick={() => handleAddonChange(addon.id, 1)}
-                                    className="w-7 h-7 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-700 transition text-sm"
-                                  >
-                                    +
-                                  </button>
+                                    className="w-7 h-7 rounded-full bg-red-600 text-white flex items-center justify-center active:bg-red-700"
+                                  >+</button>
                                 </>
                               ) : (
                                 <button
                                   onClick={() => handleAddonChange(addon.id, 1)}
-                                  className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition text-sm"
-                                >
-                                  +
-                                </button>
+                                  className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center active:bg-gray-200"
+                                >+</button>
                               )}
                             </div>
                           </div>
@@ -452,49 +463,49 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
               )
             })}
 
-            {/* Special Instructions - compact */}
-            <div className="px-4 py-3">
-              <h3 className="font-semibold text-gray-800 text-sm mb-1.5">Special Instructions</h3>
-              <textarea
-                value={specialInstructions}
-                onChange={(e) => setSpecialInstructions(e.target.value)}
-                placeholder="Any special requests?"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
-                rows={2}
-              />
-            </div>
+            {/* Special Instructions - collapsible */}
+            <details className="border-b">
+              <summary className="px-3 py-2 font-semibold text-gray-800 text-sm cursor-pointer">
+                Special Instructions <span className="text-gray-400 text-xs">(optional)</span>
+              </summary>
+              <div className="px-3 pb-2">
+                <textarea
+                  value={specialInstructions}
+                  onChange={(e) => setSpecialInstructions(e.target.value)}
+                  placeholder="Allergies, preferences..."
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-red-500 focus:border-red-500 resize-none"
+                  rows={2}
+                />
+              </div>
+            </details>
+
+            {/* Spacer for footer */}
+            <div className="h-4"></div>
           </>
         )}
       </div>
 
-      {/* Footer - Quantity & Add to Cart on same row */}
-      <div className="flex-shrink-0 border-t bg-white px-4 py-3">
+      {/* Footer - Quantity & Add to Order */}
+      <div className="flex-shrink-0 border-t bg-white px-3 py-2 safe-area-bottom">
         <div className="flex items-center gap-3">
-          {/* Quantity Selector */}
-          <div className="flex items-center gap-1 bg-gray-100 rounded-full p-0.5">
+          <div className="flex items-center bg-gray-100 rounded-full">
             <button
               onClick={() => setQuantity(q => Math.max(1, q - 1))}
-              className="w-8 h-8 rounded-full bg-white text-gray-600 flex items-center justify-center hover:bg-gray-50 transition text-base font-medium shadow-sm"
-            >
-              −
-            </button>
-            <span className="text-base font-bold text-gray-800 w-7 text-center">{quantity}</span>
+              className="w-9 h-9 rounded-full flex items-center justify-center text-gray-600 active:bg-gray-200 text-lg"
+            >−</button>
+            <span className="w-6 text-center font-bold">{quantity}</span>
             <button
               onClick={() => setQuantity(q => q + 1)}
-              className="w-8 h-8 rounded-full bg-white text-gray-600 flex items-center justify-center hover:bg-gray-50 transition text-base font-medium shadow-sm"
-            >
-              +
-            </button>
+              className="w-9 h-9 rounded-full flex items-center justify-center text-gray-600 active:bg-gray-200 text-lg"
+            >+</button>
           </div>
-
-          {/* Add to Cart Button */}
           <button
             onClick={handleAddToCart}
             disabled={loading}
-            className="flex-1 bg-red-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-red-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+            className="flex-1 bg-red-600 text-white py-3 rounded-xl font-bold text-sm active:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            <span>Add to Order</span>
-            <span className="bg-white/20 px-2 py-0.5 rounded-lg text-xs">${total.toFixed(2)}</span>
+            Add to Order
+            <span className="bg-white/20 px-2 py-0.5 rounded text-xs">${total.toFixed(2)}</span>
           </button>
         </div>
       </div>
@@ -507,7 +518,7 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
         >
           <button
             onClick={() => setShowImageZoom(false)}
-            className="absolute top-4 right-4 w-10 h-10 bg-white/20 backdrop-blur rounded-full flex items-center justify-center hover:bg-white/30 transition z-10"
+            className="absolute top-4 right-4 w-10 h-10 bg-white/20 rounded-full flex items-center justify-center"
           >
             <span className="text-white text-2xl">×</span>
           </button>
@@ -515,7 +526,6 @@ export function ProductDetailModal({ product, onClose, onAddToCart }: ProductDet
             src={product.image_url} 
             alt={product.name}
             className="max-w-full max-h-full object-contain p-4"
-            onClick={(e) => e.stopPropagation()}
           />
         </div>
       )}
