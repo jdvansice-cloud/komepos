@@ -30,11 +30,11 @@ export function DashboardLayout() {
     : activeLocation?.name || 'No Location'
 
   return (
-    <div className="min-h-screen bg-gray-100 flex">
+    <div className="h-screen bg-gray-100 flex overflow-hidden">
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-gray-900 text-white transition-all duration-300 flex flex-col`}>
+      <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-gray-900 text-white transition-all duration-300 flex flex-col h-screen flex-shrink-0`}>
         {/* Logo */}
-        <div className="p-4 border-b border-gray-800">
+        <div className="p-4 border-b border-gray-800 flex-shrink-0">
           <div className="flex items-center justify-between">
             {sidebarOpen && <h1 className="text-xl font-bold">KomePOS</h1>}
             <button
@@ -48,7 +48,7 @@ export function DashboardLayout() {
 
         {/* Active Location */}
         {sidebarOpen && (
-          <div className="px-4 py-3 border-b border-gray-800">
+          <div className="px-4 py-3 border-b border-gray-800 flex-shrink-0">
             <p className="text-xs text-gray-400 uppercase mb-1">Location</p>
             {canSwitchLocation ? (
               <button
@@ -64,8 +64,8 @@ export function DashboardLayout() {
           </div>
         )}
 
-        {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-2">
+        {/* Navigation - scrollable */}
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           {filteredMenu.map(item => {
             const isActive = location.pathname === item.path
             const isHighlight = 'highlight' in item && item.highlight
@@ -88,8 +88,8 @@ export function DashboardLayout() {
           })}
         </nav>
 
-        {/* User Info */}
-        <div className="p-4 border-t border-gray-800">
+        {/* User Info - always at bottom */}
+        <div className="p-4 border-t border-gray-800 flex-shrink-0">
           <div className={`flex items-center ${sidebarOpen ? 'justify-between' : 'justify-center'}`}>
             {sidebarOpen && (
               <div className="truncate">
