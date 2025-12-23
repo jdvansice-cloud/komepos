@@ -1268,32 +1268,35 @@ function ProductsSettings() {
 function ProductsList() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
-  const [optionGroups, setOptionGroups] = useState<{ id: string; name: string; product_id: string }[]>([])
+  const [optionGroups, setOptionGroups] = useState<{ id: string; name: string }[]>([])
   const [addonCategories, setAddonCategories] = useState<{ id: string; name: string }[]>([])
   const [productAddons, setProductAddons] = useState<{ product_id: string; addon_category_id: string }[]>([])
+  const [productOptionGroups, setProductOptionGroups] = useState<{ product_id: string; option_group_id: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
   const [filter, setFilter] = useState('')
-  const [formData, setFormData] = useState({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: '', selectedAddonCategories: [] as string[] })
+  const [formData, setFormData] = useState({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: '', selectedOptionGroups: [] as string[], selectedAddonCategories: [] as string[] })
   const [uploading, setUploading] = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
     try {
-      const [productsRes, categoriesRes, optionGroupsRes, addonCatsRes, productAddonsRes] = await Promise.all([
+      const [productsRes, categoriesRes, optionGroupsRes, addonCatsRes, productAddonsRes, productOptGroupsRes] = await Promise.all([
         supabase.from('products').select('*, category:categories(name)').order('name'),
         supabase.from('categories').select('id, name').order('name'),
-        supabase.from('option_groups').select('id, name, product_id').order('name'),
+        supabase.from('option_groups').select('id, name').order('name'),
         supabase.from('addon_categories').select('id, name').eq('is_active', true).order('name'),
         supabase.from('product_addons').select('product_id, addon_category_id'),
+        supabase.from('product_option_groups').select('product_id, option_group_id'),
       ])
       setProducts(productsRes.data || [])
       setCategories(categoriesRes.data || [])
       setOptionGroups(optionGroupsRes.data || [])
       setAddonCategories(addonCatsRes.data || [])
       setProductAddons(productAddonsRes.data || [])
+      setProductOptionGroups(productOptGroupsRes.data || [])
     } catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
   }
@@ -1302,6 +1305,7 @@ function ProductsList() {
     if (product) {
       setEditing(product)
       const productAddonIds = productAddons.filter(pa => pa.product_id === product.id).map(pa => pa.addon_category_id)
+      const productOptGroupIds = productOptionGroups.filter(po => po.product_id === product.id).map(po => po.option_group_id)
       setFormData({ 
         name: product.name, 
         description: product.description || '', 
@@ -1310,11 +1314,12 @@ function ProductsList() {
         is_taxable: product.is_taxable, 
         is_active: product.is_active, 
         category_id: product.category_id,
+        selectedOptionGroups: productOptGroupIds,
         selectedAddonCategories: productAddonIds
       })
     } else {
       setEditing(null)
-      setFormData({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: categories[0]?.id || '', selectedAddonCategories: [] })
+      setFormData({ name: '', description: '', base_price: 0, image_url: '', is_taxable: true, is_active: true, category_id: categories[0]?.id || '', selectedOptionGroups: [], selectedAddonCategories: [] })
     }
     setShowModal(true)
   }
@@ -1351,7 +1356,7 @@ function ProductsList() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     try {
-      const { selectedAddonCategories, ...productData } = formData
+      const { selectedOptionGroups, selectedAddonCategories, ...productData } = formData
       let productId = editing?.id
       
       if (editing) {
@@ -1362,18 +1367,25 @@ function ProductsList() {
         productId = newProduct?.id
       }
       
-      // Update addon category assignments
       if (productId) {
-        // Remove existing assignments
+        // Update option group assignments
+        await supabase.from('product_option_groups').delete().eq('product_id', productId)
+        if (selectedOptionGroups.length > 0) {
+          await supabase.from('product_option_groups').insert(
+            selectedOptionGroups.map(groupId => ({ product_id: productId, option_group_id: groupId }))
+          )
+        }
+        
+        // Update addon category assignments
         await supabase.from('product_addons').delete().eq('product_id', productId)
-        // Add new assignments
         if (selectedAddonCategories.length > 0) {
           await supabase.from('product_addons').insert(
             selectedAddonCategories.map(catId => ({ product_id: productId, addon_category_id: catId }))
           )
         }
+        
         // Update has_options flag
-        const hasOptions = optionGroups.some(og => og.product_id === productId) || selectedAddonCategories.length > 0
+        const hasOptions = selectedOptionGroups.length > 0 || selectedAddonCategories.length > 0
         await supabase.from('products').update({ has_options: hasOptions }).eq('id', productId)
       }
       
@@ -1388,7 +1400,8 @@ function ProductsList() {
   }
 
   function getProductOptionGroups(productId: string) {
-    return optionGroups.filter(og => og.product_id === productId)
+    const groupIds = productOptionGroups.filter(po => po.product_id === productId).map(po => po.option_group_id)
+    return optionGroups.filter(og => groupIds.includes(og.id))
   }
 
   function getProductAddonCategories(productId: string) {
@@ -1493,10 +1506,40 @@ function ProductsList() {
                 </div>
               </div>
               
+              {/* Option Groups Assignment */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Option Groups (included in price)</label>
+                <div className="border rounded-lg p-3 max-h-32 overflow-y-auto bg-blue-50">
+                  {optionGroups.length === 0 ? (
+                    <p className="text-gray-400 text-sm">No option groups created yet. Go to "Option Groups" tab to create some.</p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      {optionGroups.map(group => (
+                        <label key={group.id} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.selectedOptionGroups.includes(group.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFormData({ ...formData, selectedOptionGroups: [...formData.selectedOptionGroups, group.id] })
+                              } else {
+                                setFormData({ ...formData, selectedOptionGroups: formData.selectedOptionGroups.filter(id => id !== group.id) })
+                              }
+                            }}
+                            className="rounded text-blue-600"
+                          />
+                          <span className="text-sm">{group.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              
               {/* Addon Categories Assignment */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Addon Categories (items that add to price)</label>
-                <div className="border rounded-lg p-3 max-h-32 overflow-y-auto bg-gray-50">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Addon Categories (extra charge)</label>
+                <div className="border rounded-lg p-3 max-h-32 overflow-y-auto bg-orange-50">
                   {addonCategories.length === 0 ? (
                     <p className="text-gray-400 text-sm">No addon categories created yet. Go to "Addon Categories" tab to create some.</p>
                   ) : (
@@ -1521,7 +1564,6 @@ function ProductsList() {
                     </div>
                   )}
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Option Groups are assigned directly to products in the "Option Groups" tab</p>
               </div>
 
               <div className="flex gap-4">
@@ -1541,26 +1583,28 @@ function ProductsList() {
 }
 
 // Option Groups List Sub-component
-interface OptionGroupFull { id: string; name: string; product_id: string; selection_type: 'single' | 'multiple'; min_selections: number; max_selections: number; is_required: boolean; sort_order: number; product?: { name: string }; options: OptionItem[] }
+interface OptionGroupFull { id: string; name: string; selection_type: 'single' | 'multiple'; min_selections: number; max_selections: number; is_required: boolean; sort_order: number; options: OptionItem[] }
 interface OptionItem { id: string; name: string; is_default: boolean; is_available: boolean; sort_order: number }
 
 function OptionGroupsList() {
   const [optionGroups, setOptionGroups] = useState<OptionGroupFull[]>([])
+  const [productOptionGroups, setProductOptionGroups] = useState<{ option_group_id: string; product_id: string }[]>([])
   const [products, setProducts] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<OptionGroupFull | null>(null)
-  const [formData, setFormData] = useState({ name: '', product_id: '', selection_type: 'single' as 'single' | 'multiple', min_selections: 1, max_selections: 1, is_required: true })
+  const [formData, setFormData] = useState({ name: '', selection_type: 'single' as 'single' | 'multiple', min_selections: 1, max_selections: 1, is_required: true })
   const [options, setOptions] = useState<{ id?: string; name: string; is_default: boolean; is_available: boolean; sort_order: number }[]>([])
 
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
     try {
-      const [groupsRes, productsRes, optionsRes] = await Promise.all([
-        supabase.from('option_groups').select('*, product:products(name)').order('name'),
-        supabase.from('products').select('id, name').eq('is_active', true).order('name'),
+      const [groupsRes, optionsRes, prodOptGroupsRes, productsRes] = await Promise.all([
+        supabase.from('option_groups').select('*').order('name'),
         supabase.from('options').select('*').order('sort_order'),
+        supabase.from('product_option_groups').select('option_group_id, product_id'),
+        supabase.from('products').select('id, name').order('name'),
       ])
       
       const groups = (groupsRes.data || []).map(g => ({
@@ -1569,9 +1613,15 @@ function OptionGroupsList() {
       }))
       
       setOptionGroups(groups)
+      setProductOptionGroups(prodOptGroupsRes.data || [])
       setProducts(productsRes.data || [])
     } catch (error) { console.error('Error:', error) }
     finally { setLoading(false) }
+  }
+
+  function getGroupProducts(groupId: string) {
+    const productIds = productOptionGroups.filter(po => po.option_group_id === groupId).map(po => po.product_id)
+    return products.filter(p => productIds.includes(p.id))
   }
 
   function openModal(group?: OptionGroupFull) {
@@ -1579,7 +1629,6 @@ function OptionGroupsList() {
       setEditing(group)
       setFormData({ 
         name: group.name, 
-        product_id: group.product_id, 
         selection_type: group.selection_type,
         min_selections: group.min_selections,
         max_selections: group.max_selections,
@@ -1588,7 +1637,7 @@ function OptionGroupsList() {
       setOptions(group.options.map(o => ({ id: o.id, name: o.name, is_default: o.is_default, is_available: o.is_available, sort_order: o.sort_order })))
     } else {
       setEditing(null)
-      setFormData({ name: '', product_id: products[0]?.id || '', selection_type: 'single', min_selections: 1, max_selections: 1, is_required: true })
+      setFormData({ name: '', selection_type: 'single', min_selections: 1, max_selections: 1, is_required: true })
       setOptions([{ name: '', is_default: true, is_available: true, sort_order: 0 }])
     }
     setShowModal(true)
@@ -1601,7 +1650,6 @@ function OptionGroupsList() {
   function removeOption(index: number) {
     if (options.length <= 1) return
     const newOptions = options.filter((_, i) => i !== index)
-    // If we removed the default, make first one default
     if (options[index].is_default && newOptions.length > 0) {
       newOptions[0].is_default = true
     }
@@ -1611,7 +1659,6 @@ function OptionGroupsList() {
   function updateOption(index: number, field: string, value: any) {
     const newOptions = [...options]
     if (field === 'is_default' && value && formData.selection_type === 'single') {
-      // For single selection, only one can be default
       newOptions.forEach((o, i) => o.is_default = i === index)
     } else {
       (newOptions[index] as any)[field] = value
@@ -1628,19 +1675,17 @@ function OptionGroupsList() {
     
     try {
       let groupId = editing?.id
+      const { data: company } = await supabase.from('companies').select('id').single()
       
       if (editing) {
         await supabase.from('option_groups').update(formData).eq('id', editing.id)
       } else {
-        const { data: newGroup } = await supabase.from('option_groups').insert(formData).select().single()
+        const { data: newGroup } = await supabase.from('option_groups').insert({ ...formData, company_id: company?.id, sort_order: optionGroups.length }).select().single()
         groupId = newGroup?.id
       }
       
       if (groupId) {
-        // Delete existing options
         await supabase.from('options').delete().eq('option_group_id', groupId)
-        
-        // Insert new options
         const validOptions = options.filter(o => o.name.trim())
         if (validOptions.length > 0) {
           await supabase.from('options').insert(
@@ -1653,12 +1698,6 @@ function OptionGroupsList() {
             }))
           )
         }
-        
-        // Update product has_options flag
-        const { data: productAddons } = await supabase.from('product_addons').select('product_id').eq('product_id', formData.product_id)
-        const { data: productGroups } = await supabase.from('option_groups').select('id').eq('product_id', formData.product_id)
-        const hasOptions = (productAddons?.length || 0) > 0 || (productGroups?.length || 0) > 0
-        await supabase.from('products').update({ has_options: hasOptions }).eq('id', formData.product_id)
       }
       
       setShowModal(false)
@@ -1667,17 +1706,11 @@ function OptionGroupsList() {
   }
 
   async function deleteGroup(group: OptionGroupFull) {
-    if (!confirm(`Delete option group "${group.name}" and all its options?`)) return
+    if (!confirm(`Delete option group "${group.name}" and all its options? This will also remove it from all products.`)) return
     try {
+      await supabase.from('product_option_groups').delete().eq('option_group_id', group.id)
       await supabase.from('options').delete().eq('option_group_id', group.id)
       await supabase.from('option_groups').delete().eq('id', group.id)
-      
-      // Update product has_options flag
-      const { data: productAddons } = await supabase.from('product_addons').select('product_id').eq('product_id', group.product_id)
-      const { data: productGroups } = await supabase.from('option_groups').select('id').eq('product_id', group.product_id)
-      const hasOptions = (productAddons?.length || 0) > 0 || ((productGroups?.length || 0) - 1) > 0
-      await supabase.from('products').update({ has_options: hasOptions }).eq('id', group.product_id)
-      
       fetchData()
     } catch (error) { console.error('Error:', error) }
   }
@@ -1689,7 +1722,7 @@ function OptionGroupsList() {
       <div className="flex justify-between items-center mb-4">
         <div>
           <h2 className="text-lg font-semibold text-gray-800">Option Groups</h2>
-          <p className="text-sm text-gray-500">Options are included in price (e.g., Choose your drink, Choose your sauce)</p>
+          <p className="text-sm text-gray-500">Options included in price (e.g., Choose your drink, Choose your sauce). Assign to products in the Products tab.</p>
         </div>
         <button onClick={() => openModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ Add Option Group</button>
       </div>
@@ -1700,31 +1733,38 @@ function OptionGroupsList() {
             No option groups created yet. Click "Add Option Group" to create one.
           </div>
         ) : (
-          optionGroups.map(group => (
-            <div key={group.id} className="bg-white rounded-lg shadow p-4">
-              <div className="flex justify-between items-start mb-3">
-                <div>
-                  <h3 className="font-semibold text-gray-800">{group.name}</h3>
-                  <p className="text-sm text-gray-500">
-                    Product: <span className="font-medium">{group.product?.name}</span> • 
-                    {group.selection_type === 'single' ? ' Single selection (•)' : ' Multiple selection (☑)'} • 
-                    {group.is_required ? ' Required' : ' Optional'}
-                  </p>
+          optionGroups.map(group => {
+            const groupProducts = getGroupProducts(group.id)
+            return (
+              <div key={group.id} className="bg-white rounded-lg shadow p-4">
+                <div className="flex justify-between items-start mb-3">
+                  <div>
+                    <h3 className="font-semibold text-gray-800">{group.name}</h3>
+                    <p className="text-sm text-gray-500">
+                      {group.selection_type === 'single' ? 'Single selection (•)' : 'Multiple selection (☑)'} • 
+                      {group.is_required ? ' Required' : ' Optional'}
+                      {groupProducts.length > 0 && (
+                        <span className="ml-2 text-blue-600">
+                          • Used by: {groupProducts.map(p => p.name).join(', ')}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => openModal(group)} className="text-blue-600 hover:text-blue-800 text-sm">Edit</button>
+                    <button onClick={() => deleteGroup(group)} className="text-red-600 hover:text-red-800 text-sm">Delete</button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => openModal(group)} className="text-blue-600 hover:text-blue-800 text-sm">Edit</button>
-                  <button onClick={() => deleteGroup(group)} className="text-red-600 hover:text-red-800 text-sm">Delete</button>
+                <div className="flex flex-wrap gap-2">
+                  {group.options.map(opt => (
+                    <span key={opt.id} className={`px-3 py-1 rounded-full text-sm ${opt.is_default ? 'bg-blue-100 text-blue-700 font-medium' : 'bg-gray-100 text-gray-600'} ${!opt.is_available ? 'opacity-50 line-through' : ''}`}>
+                      {group.selection_type === 'single' ? '○' : '☐'} {opt.name} {opt.is_default && '(default)'}
+                    </span>
+                  ))}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {group.options.map(opt => (
-                  <span key={opt.id} className={`px-3 py-1 rounded-full text-sm ${opt.is_default ? 'bg-blue-100 text-blue-700 font-medium' : 'bg-gray-100 text-gray-600'} ${!opt.is_available ? 'opacity-50 line-through' : ''}`}>
-                    {group.selection_type === 'single' ? '○' : '☐'} {opt.name} {opt.is_default && '(default)'}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
 
@@ -1733,18 +1773,9 @@ function OptionGroupsList() {
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">{editing ? 'Edit Option Group' : 'Add Option Group'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Group Name *</label>
-                  <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="e.g., Choose Your Drink" required />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Product *</label>
-                  <select value={formData.product_id} onChange={(e) => setFormData({ ...formData, product_id: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" required>
-                    <option value="">Select product</option>
-                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Group Name *</label>
+                <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-4 py-2" placeholder="e.g., Choose Your Drink" required />
               </div>
 
               <div className="grid grid-cols-3 gap-4">
@@ -1774,7 +1805,6 @@ function OptionGroupsList() {
                 <span className="text-sm">Required (customer must make a selection)</span>
               </label>
 
-              {/* Options List */}
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-sm font-medium text-gray-700">Options (no extra charge)</label>
